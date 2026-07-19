@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
 
+    # Enables the Claude-backed project planner. Empty in dev = keyword fake.
+    anthropic_api_key: str = ""
+
     # Borrower-side service fee.
     service_fee_pct: float = 0.15
     service_fee_min_cents: int = 100

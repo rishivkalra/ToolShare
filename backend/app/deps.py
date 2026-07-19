@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .config import Settings, get_settings
 from .repos.base import BookingRepo, ListingRepo, MessageRepo, ReviewRepo, UserRepo
 from .services.payments import FakePayments, PaymentProvider
+from .services.project_planner import ProjectPlanner, build_planner
 
 
 @dataclass
@@ -16,6 +17,7 @@ class Container:
     messages: MessageRepo
     reviews: ReviewRepo
     payments: PaymentProvider
+    planner: ProjectPlanner
 
 
 _container: Container | None = None
@@ -44,6 +46,7 @@ def build_container(settings: Settings) -> Container:
             messages=FirestoreMessageRepo(db),
             reviews=FirestoreReviewRepo(db),
             payments=StripePayments(settings.stripe_secret_key, settings.service_base_url),
+            planner=build_planner(settings.env, settings.anthropic_api_key),
         )
 
     from .repos.memory import (
@@ -61,6 +64,7 @@ def build_container(settings: Settings) -> Container:
         messages=MemoryMessageRepo(),
         reviews=MemoryReviewRepo(),
         payments=FakePayments(),
+        planner=build_planner(settings.env, settings.anthropic_api_key),
     )
 
 

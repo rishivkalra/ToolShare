@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from .config import get_settings
-from .routers import bookings, listings, messages, reviews, users
+from .routers import bookings, listings, messages, projects, reviews, users
 
 app = FastAPI(
     title="ToolShare API",
@@ -15,6 +15,7 @@ app.include_router(listings.router)
 app.include_router(bookings.router)
 app.include_router(messages.router)
 app.include_router(reviews.router)
+app.include_router(projects.router)
 
 
 @app.get("/healthz", tags=["ops"])
