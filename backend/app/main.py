@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Response
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .routers import bookings, internal, listings, messages, projects, reviews, users
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 app = FastAPI(
     title="ToolShare API",
@@ -27,10 +32,14 @@ def healthz():
 
 @app.get("/", include_in_schema=False)
 def root():
-    """Browser-friendly landing: send visitors to the interactive API docs."""
-    return RedirectResponse(url="/docs")
+    """Browser landing: the web app if bundled, else the API docs."""
+    return RedirectResponse(url="/app/" if WEB_DIR.exists() else "/docs")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return Response(status_code=204)
+
+
+if WEB_DIR.exists():
+    app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="web")

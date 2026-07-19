@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ToolShare — the tool library your street already owns</title>
+<meta name="description" content="Rent idle tools from neighbors for a few dollars a day. Less wastage, no repeat purchases.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#/browse">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="3" y="13" width="26" height="16" rx="3" fill="var(--green)"/>
+      <path d="M4 14 16 4l12 10" fill="none" stroke="var(--green)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M12 22h8M16 18v8" stroke="#FBF7EE" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+    <span>ToolShare</span>
+  </a>
+  <nav class="topnav" id="topnav" aria-label="Primary">
+    <a href="#/browse" data-tab="browse">Browse</a>
+    <a href="#/project" data-tab="project">Project kit</a>
+    <a href="#/list" data-tab="list">List a tool</a>
+    <a href="#/rentals" data-tab="rentals">Rentals</a>
+    <a href="#/profile" data-tab="profile">Profile</a>
+  </nav>
+  <button class="whoami" id="whoami" title="Switch demo user">🙂 <span id="whoami-name">…</span></button>
+</header>
+
+<main id="main">
+
+  <!-- ============ BROWSE ============ -->
+  <section id="tab-browse" class="tab">
+    <div class="hero">
+      <h1>Borrow the tool.<br><em>Skip the purchase.</em></h1>
+      <p class="hero-sub">Your neighbors' garages hold every tool you'll ever need — rent one for a few dollars a day.</p>
+      <div class="searchrow">
+        <input id="search-input" type="search" placeholder="Try “drill”, “ladder”, “saw”…" autocomplete="off">
+        <button class="btn btn-primary" id="search-btn">Search</button>
+      </div>
+      <div class="locrow" id="locrow"></div>
+    </div>
+    <div id="browse-results" class="cardgrid"></div>
+  </section>
+
+  <!-- ============ PROJECT KIT ============ -->
+  <section id="tab-project" class="tab">
+    <div class="hero">
+      <span class="kicker">✨ Powered by Gemini</span>
+      <h1>Describe the project.<br><em>We'll find the tools.</em></h1>
+      <p class="hero-sub">Tell us what you're building — we plan the tool list and match it against what neighbors actually have.</p>
+      <div class="projectbox">
+        <textarea id="project-input" rows="3" placeholder="e.g. I want to build a raised garden bed in my backyard"></textarea>
+        <button class="btn btn-primary btn-big" id="plan-btn">Build my tool kit</button>
+      </div>
+    </div>
+    <div id="kit-results"></div>
+  </section>
+
+  <!-- ============ LIST A TOOL ============ -->
+  <section id="tab-list" class="tab">
+    <div class="hero">
+      <h1>Turn idle tools<br><em>into beer money.</em></h1>
+      <p class="hero-sub">You keep 100% of your listed price — borrowers pay the small service fee. Listing takes a minute.</p>
+    </div>
+    <form id="list-form" class="panel form">
+      <label>What are you lending?
+        <input name="title" required minlength="3" placeholder="e.g. DeWalt 20V cordless drill">
+      </label>
+      <label>Category
+        <select name="category" id="category-select"></select>
+      </label>
+      <label>Description <span class="opt">optional</span>
+        <textarea name="description" rows="2" placeholder="Condition notes, blade size, battery included…"></textarea>
+      </label>
+      <div class="formrow">
+        <label>Price per day ($)
+          <input name="price" type="number" min="5" step="1" value="8" required>
+        </label>
+        <label>Deposit ($) <span class="opt">0 = none</span>
+          <input name="deposit" type="number" min="0" step="5" value="50">
+        </label>
+      </div>
+      <label>Pickup address <span class="opt">only shared after a confirmed booking</span>
+        <input name="address" placeholder="123 Alder St">
+      </label>
+      <button class="btn btn-primary btn-big" type="submit">List my tool</button>
+      <p class="fineprint">Payouts arrive via Stripe after each rental. Approximate location only is shown publicly.</p>
+    </form>
+  </section>
+
+  <!-- ============ RENTALS ============ -->
+  <section id="tab-rentals" class="tab">
+    <div class="hero"><h1>Your rentals</h1>
+      <p class="hero-sub">Requests, handoffs and payouts — both the tools you're borrowing and the ones you're lending.</p>
+    </div>
+    <div id="rentals-list"></div>
+  </section>
+
+  <!-- ============ PROFILE ============ -->
+  <section id="tab-profile" class="tab">
+    <div class="hero"><h1>Profile</h1></div>
+    <div class="panel">
+      <div class="profile-head">
+        <div class="avatar" id="profile-avatar">🙂</div>
+        <div>
+          <div class="profile-name" id="profile-name">…</div>
+          <div class="profile-rating" id="profile-rating"></div>
+        </div>
+      </div>
+      <label class="switcher">Demo sign-in <span class="opt">staging only — Sign in with Apple/Google at launch</span>
+        <div class="searchrow">
+          <input id="uid-input" placeholder="your name, e.g. maya">
+          <button class="btn" id="uid-btn">Switch</button>
+        </div>
+      </label>
+      <div class="profile-actions">
+        <button class="btn" id="pay-btn">💳 Add payment method</button>
+        <button class="btn" id="connect-btn">🏦 Set up payouts (Stripe)</button>
+      </div>
+      <p class="fineprint">Stripe handles identity and bank details — ToolShare never sees them. In staging, payments are simulated.</p>
+    </div>
+  </section>
+</main>
+
+<nav class="bottomnav" id="bottomnav" aria-label="Primary">
+  <a href="#/browse" data-tab="browse"><span>🔍</span>Browse</a>
+  <a href="#/project" data-tab="project"><span>✨</span>Project</a>
+  <a href="#/list" data-tab="list"><span>➕</span>List</a>
+  <a href="#/rentals" data-tab="rentals"><span>🤝</span>Rentals</a>
+  <a href="#/profile" data-tab="profile"><span>🙂</span>Profile</a>
+</nav>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
