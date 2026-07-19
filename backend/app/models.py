@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import enum
+from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class ToolCategory(str, enum.Enum):
+    POWER_TOOLS = "power_tools"
+    HAND_TOOLS = "hand_tools"
+    GARDEN = "garden"
+    LADDERS_ACCESS = "ladders_access"
+    PAINTING_DECORATING = "painting_decorating"
+    PLUMBING = "plumbing"
+    AUTOMOTIVE = "automotive"
+    CLEANING = "cleaning"
+    MEASURING = "measuring"
+    OTHER = "other"
+
+
+class ListingStatus(str, enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    REMOVED = "removed"
+
+
+class BookingState(str, enum.Enum):
+    REQUESTED = "requested"
+    APPROVED = "approved"  # lender said yes; payment in flight
+    CONFIRMED = "confirmed"  # rental charged, deposit held
+    PICKED_UP = "picked_up"
+    RETURNED = "returned"
+    COMPLETED = "completed"  # payout released
+    DECLINED = "declined"
+    EXPIRED = "expired"
+    CANCELLED_BY_BORROWER = "cancelled_by_borrower"
+    CANCELLED_BY_LENDER = "cancelled_by_lender"
+    DISPUTED = "disputed"
+
+
+TERMINAL_STATES = {
+    BookingState.COMPLETED,
+    BookingState.DECLINED,
+    BookingState.EXPIRED,
+    BookingState.CANCELLED_BY_BORROWER,
+    BookingState.CANCELLED_BY_LENDER,
+}
+
+
+# ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+
+class UserProfile(BaseModel):
+    uid: str
+    display_name: str = ""
+    photo_url: str = ""
+    phone_verified: bool = False
+    stripe_customer_id: str = ""
+    stripe_connect_id: str = ""
+    rating_avg: float = 0.0
+    rating_count: int = 0
+    created_at: Optional[datetime] = None
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=80)
+    photo_url: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Listings
+# ---------------------------------------------------------------------------
+
+class ListingCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    category: ToolCategory
+    description: str = Field(default="", max_length=2000)
+    condition: str = Field(default="good", max_length=40)
+    photos: list[str] = Field(default_factory=list, max_length=8)
+    price_per_day_cents: int = Field(ge=500, le=50_000)
+    deposit_cents: int = Field(default=0, ge=0, le=200_000)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    exact_address: str = Field(default="", max_length=300)
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, v: str) -> str:
+        return v.strip()
+
+
+class ListingUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=3, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    condition: Optional[str] = None
+    photos: Optional[list[str]] = None
+    price_per_day_cents: Optional[int] = Field(default=None, ge=500, le=50_000)
+    deposit_cents: Optional[int] = Field(default=None, ge=0, le=200_000)
+    status: Optional[ListingStatus] = None
+
+
+class Listing(BaseModel):
+    id: str
+    owner_uid: str
+    title: str
+    category: ToolCategory
+    description: str = ""
+    condition: str = "good"
+    photos: list[str] = Field(default_factory=list)
+    price_per_day_cents: int
+    deposit_cents: int = 0
+    geohash: str = ""
+    # Jittered coordinates safe for public display; exact address is only
+    # ever exposed through the booking detail endpoint after confirmation.
+    approx_lat: float = 0.0
+    approx_lng: float = 0.0
+    status: ListingStatus = ListingStatus.ACTIVE
+    rating_avg: float = 0.0
+    rating_count: int = 0
+    created_at: Optional[datetime] = None
+
+
+class ListingSearchResult(BaseModel):
+    listing: Listing
+    distance_km: float
+
+
+# ---------------------------------------------------------------------------
+# Bookings
+# ---------------------------------------------------------------------------
+
+class PriceBreakdown(BaseModel):
+    days: int
+    price_per_day_cents: int
+    rental_cents: int
+    service_fee_cents: int
+    total_cents: int
+    deposit_cents: int
+    currency: str = "usd"
+
+
+class BookingCreate(BaseModel):
+    listing_id: str
+    start_date: date
+    end_date: date
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start(cls, v: date, info) -> date:
+        start = info.data.get("start_date")
+        if start and v < start:
+            raise ValueError("end_date must be on or after start_date")
+        return v
+
+
+class TimelineEvent(BaseModel):
+    at: datetime
+    actor_uid: str  # "system" for automated transitions
+    from_state: Optional[BookingState] = None
+    to_state: BookingState
+    note: str = ""
+
+
+class Booking(BaseModel):
+    id: str
+    listing_id: str
+    listing_title: str = ""
+    borrower_uid: str
+    lender_uid: str
+    start_date: date
+    end_date: date
+    state: BookingState = BookingState.REQUESTED
+    price: PriceBreakdown
+    stripe_payment_intent: str = ""
+    stripe_deposit_intent: str = ""
+    stripe_transfer_id: str = ""
+    borrower_marked_pickup: bool = False
+    lender_marked_pickup: bool = False
+    exact_address: str = ""  # populated only for participants once CONFIRMED
+    timeline: list[TimelineEvent] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Chat & reviews
+# ---------------------------------------------------------------------------
+
+class MessageCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class Message(BaseModel):
+    id: str
+    booking_id: str
+    sender_uid: str
+    text: str
+    created_at: Optional[datetime] = None
+
+
+class ReviewCreate(BaseModel):
+    stars: int = Field(ge=1, le=5)
+    text: str = Field(default="", max_length=1000)
+
+
+class Review(BaseModel):
+    id: str
+    booking_id: str
+    from_uid: str
+    to_uid: str
+    stars: int
+    text: str = ""
+    created_at: Optional[datetime] = None

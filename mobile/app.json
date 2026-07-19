@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "ToolShare",
+    "slug": "toolshare",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "toolshare",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.toolshare.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "ToolShare shows tools available near you.",
+        "NSCameraUsageDescription": "Take photos of tools you want to list."
+      }
+    },
+    "android": {
+      "package": "com.toolshare.app",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA"]
+    },
+    "plugins": [
+      "expo-location",
+      "expo-image-picker",
+      ["@stripe/stripe-react-native", { "merchantIdentifier": "merchant.com.toolshare.app" }]
+    ]
+  }
+}
