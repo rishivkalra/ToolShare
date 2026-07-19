@@ -43,16 +43,13 @@ Interactive API docs: http://localhost:8080/docs
 ## Deploy to Cloud Run
 
 ```bash
-gcloud run deploy toolshare-api \
-  --source backend \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars TOOLSHARE_ENV=prod,TOOLSHARE_GCP_PROJECT=$PROJECT_ID \
-  --set-secrets TOOLSHARE_STRIPE_SECRET_KEY=stripe-secret:latest
+PROJECT_ID=your-project ./deploy.sh
 ```
 
-Prod requires: a Firestore database, a Stripe account with Connect (Express)
-enabled, and Firebase Auth configured for Sign in with Apple + Google + phone.
+`deploy.sh` header lists the one-time setup (enable APIs, Firestore database,
+Cloud Tasks queue, secrets). Prod requires: a Stripe account with Connect
+(Express) enabled, an Anthropic API key for project kits, and Firebase Auth
+configured for Sign in with Apple + Google + phone.
 
 ## Architecture notes
 
@@ -69,11 +66,24 @@ enabled, and Firebase Auth configured for Sign in with Apple + Google + phone.
 - **Repos** (`app/repos/`): protocol-based; in-memory for dev/tests, Firestore
   for prod, selected by `TOOLSHARE_ENV`.
 
-## Not yet implemented (week-1 backlog)
+## Lifecycle jobs & payments plumbing
 
-- Cloud Tasks jobs: 24h request expiry, deposit auto-void, payout retry after
-  late Connect onboarding
+- **Request expiry**: every booking request schedules a Cloud Tasks callback
+  to `/internal/tasks/expire-booking` after 24h; unanswered requests expire.
+  Handlers are idempotent and protected by `TOOLSHARE_INTERNAL_TASK_SECRET`.
+- **PaymentSheet setup**: `POST /v1/users/me/setup-intent` returns the
+  customer id + SetupIntent client secret + ephemeral key the mobile Stripe
+  PaymentSheet needs to save a card (charged off-session at approval).
+- **Payout sweep**: rentals returned before the lender finished Connect
+  onboarding complete with a pending payout; `POST /v1/users/me/connect/complete`
+  (called when the app returns from hosted onboarding) sweeps and pays them.
+- **Kit checkout**: `POST /v1/projects/checkout` turns a project kit into one
+  booking request per listing, best-effort per item.
+
+## Not yet implemented (backlog)
+
 - FCM push notifications on booking events and messages
 - Signed-URL photo upload to Cloud Storage
 - Stripe webhook receiver (async payment confirmation for 3DS cards)
+- Deposit auto-void delay window (currently voided synchronously at return)
 - Admin kill-switch endpoints

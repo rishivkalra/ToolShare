@@ -2,14 +2,18 @@
 what's actually rentable nearby — the whole kit in one screen."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import geo
 from ..auth import current_uid
+from ..config import Settings, get_settings
 from ..deps import Container, get_container
-from ..models import Listing, ListingStatus
+from ..models import Booking, BookingCreate, Listing, ListingStatus
 from ..services.project_planner import PlannedTool, ProjectPlan
+from .bookings import create_booking_request
 
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
@@ -84,3 +88,53 @@ def plan_project(
         total_estimated_per_day_cents=total,
         missing_tools=missing,
     )
+
+
+class KitCheckoutRequest(BaseModel):
+    listing_ids: list[str] = Field(min_length=1, max_length=12)
+    start_date: date
+    end_date: date
+
+
+class KitCheckoutItem(BaseModel):
+    listing_id: str
+    booking_id: str = ""
+    error: str = ""
+
+
+class KitCheckoutResponse(BaseModel):
+    items: list[KitCheckoutItem]
+    requested: int
+    failed: int
+
+
+@router.post("/checkout", response_model=KitCheckoutResponse)
+def kit_checkout(
+    body: KitCheckoutRequest,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+    settings: Settings = Depends(get_settings),
+):
+    """One-tap kit rental: a booking request per listing for the same dates.
+
+    Best-effort per item — one unavailable tool doesn't sink the rest of the
+    kit; failures come back with the reason so the app can offer alternatives.
+    """
+    items: list[KitCheckoutItem] = []
+    for listing_id in dict.fromkeys(body.listing_ids):  # dedupe, keep order
+        try:
+            booking: Booking = create_booking_request(
+                c,
+                settings,
+                uid,
+                BookingCreate(
+                    listing_id=listing_id,
+                    start_date=body.start_date,
+                    end_date=body.end_date,
+                ),
+            )
+            items.append(KitCheckoutItem(listing_id=listing_id, booking_id=booking.id))
+        except HTTPException as e:
+            items.append(KitCheckoutItem(listing_id=listing_id, error=str(e.detail)))
+    failed = sum(1 for i in items if i.error)
+    return KitCheckoutResponse(items=items, requested=len(items) - failed, failed=failed)

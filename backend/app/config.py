@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     tasks_queue: str = ""
     tasks_location: str = "us-central1"
     service_base_url: str = ""  # public URL of this service, for task callbacks
+    # Shared secret for /internal/tasks/* handlers; empty in dev = check skipped.
+    internal_task_secret: str = ""
 
     # Dev-only: bearer token accepted as "user:<uid>" without Firebase.
     dev_auth_enabled: bool = True

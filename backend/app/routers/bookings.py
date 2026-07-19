@@ -49,13 +49,10 @@ def _transition_or_409(booking: Booking, to_state: BookingState, actor: str, not
         raise HTTPException(status_code=409, detail=str(e))
 
 
-@router.post("", response_model=Booking, status_code=201)
-def request_booking(
-    body: BookingCreate,
-    uid: str = Depends(current_uid),
-    c: Container = Depends(get_container),
-    settings: Settings = Depends(get_settings),
-):
+def create_booking_request(
+    c: Container, settings: Settings, uid: str, body: BookingCreate
+) -> Booking:
+    """Shared by single-booking requests and project-kit checkout."""
     listing = c.listings.get(body.listing_id)
     if not listing or listing.status != ListingStatus.ACTIVE:
         raise HTTPException(status_code=404, detail="Listing not available")
@@ -90,7 +87,23 @@ def request_booking(
             note="requested",
         )
     )
-    return c.bookings.create(booking)
+    c.bookings.create(booking)
+    c.tasks.schedule(
+        "/internal/tasks/expire-booking",
+        {"booking_id": booking.id},
+        settings.request_expiry_hours * 3600,
+    )
+    return booking
+
+
+@router.post("", response_model=Booking, status_code=201)
+def request_booking(
+    body: BookingCreate,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+    settings: Settings = Depends(get_settings),
+):
+    return create_booking_request(c, settings, uid, body)
 
 
 @router.get("", response_model=list[Booking])

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..auth import current_uid
 from ..deps import Container, get_container
-from ..models import UserProfile, UserUpdate
+from ..models import BookingState, UserProfile, UserUpdate
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
 
@@ -54,6 +54,69 @@ def start_connect_onboarding(
         user.stripe_connect_id = acct_id
         c.users.upsert(user)
     return ConnectLinkResponse(connect_account_id=acct_id, onboarding_url=url)
+
+
+class SetupIntentResponse(BaseModel):
+    customer_id: str
+    setup_intent_client_secret: str
+    ephemeral_key_secret: str
+
+
+@router.post("/me/setup-intent", response_model=SetupIntentResponse)
+def create_setup_intent(
+    uid: str = Depends(current_uid), c: Container = Depends(get_container)
+):
+    """Everything the mobile Stripe PaymentSheet needs to save a card.
+
+    Called before the first booking request; the saved payment method is then
+    charged off-session when a lender approves.
+    """
+    user = c.users.get(uid) or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    customer_id = c.payments.ensure_customer(uid, user.stripe_customer_id)
+    if customer_id != user.stripe_customer_id:
+        user.stripe_customer_id = customer_id
+        c.users.upsert(user)
+    bundle = c.payments.create_setup_intent(customer_id)
+    return SetupIntentResponse(
+        customer_id=bundle.customer_id,
+        setup_intent_client_secret=bundle.setup_intent_client_secret,
+        ephemeral_key_secret=bundle.ephemeral_key_secret,
+    )
+
+
+class PayoutSweepResponse(BaseModel):
+    paid_bookings: list[str]
+    total_cents: int
+
+
+@router.post("/me/connect/complete", response_model=PayoutSweepResponse)
+def complete_connect_onboarding(
+    uid: str = Depends(current_uid), c: Container = Depends(get_container)
+):
+    """Called when the app returns from Stripe Connect hosted onboarding.
+
+    Sweeps any completed rentals whose payout was pending because the lender
+    had no Connect account at return time.
+    """
+    user = c.users.get(uid)
+    if not user or not user.stripe_connect_id:
+        raise HTTPException(status_code=409, detail="Connect onboarding not started")
+
+    paid: list[str] = []
+    total = 0
+    for booking in c.bookings.for_user(uid):
+        if (
+            booking.lender_uid == uid
+            and booking.state == BookingState.COMPLETED
+            and not booking.stripe_transfer_id
+        ):
+            booking.stripe_transfer_id = c.payments.payout_lender(
+                user.stripe_connect_id, booking.price.rental_cents, booking.id
+            )
+            c.bookings.update(booking)
+            paid.append(booking.id)
+            total += booking.price.rental_cents
+    return PayoutSweepResponse(paid_bookings=paid, total_cents=total)
 
 
 @router.get("/{uid}", response_model=UserProfile)

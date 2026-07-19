@@ -36,6 +36,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _addPaymentMethod() async {
+    try {
+      final bundle = await ApiClient.instance.setupIntent();
+      if (!mounted) return;
+      // Production: hand this bundle to flutter_stripe's PaymentSheet —
+      //   Stripe.instance.initPaymentSheet(SetupPaymentSheetParameters(
+      //     setupIntentClientSecret: bundle.setupIntentClientSecret,
+      //     customerId: bundle.customerId,
+      //     customerEphemeralKeySecret: bundle.ephemeralKeySecret,
+      //     applePay/googlePay: ...))
+      //   then Stripe.instance.presentPaymentSheet().
+      // Dev backend returns fake secrets, so just confirm the wiring.
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Payment setup ready (customer ${bundle.customerId}). '
+              'PaymentSheet opens here in production.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Payment setup failed: $e')));
+    }
+  }
+
   Future<void> _startPayouts() async {
     try {
       final url = await ApiClient.instance.connectOnboardingUrl();
@@ -97,6 +120,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: _addPaymentMethod,
+            icon: const Icon(Icons.credit_card),
+            label: const Text('Add payment method'),
+          ),
+          const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _startPayouts,
             icon: const Icon(Icons.account_balance),

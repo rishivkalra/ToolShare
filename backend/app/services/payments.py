@@ -23,8 +23,18 @@ class PaymentResult:
     status: str  # succeeded | requires_action | requires_capture | canceled | failed
 
 
+@dataclass
+class SetupIntentBundle:
+    """Everything the mobile PaymentSheet needs to collect a card."""
+
+    customer_id: str
+    setup_intent_client_secret: str
+    ephemeral_key_secret: str
+
+
 class PaymentProvider(Protocol):
     def ensure_customer(self, uid: str, existing_customer_id: str) -> str: ...
+    def create_setup_intent(self, customer_id: str) -> SetupIntentBundle: ...
     def charge_rental(
         self, customer_id: str, amount_cents: int, booking_id: str
     ) -> PaymentResult: ...
@@ -57,6 +67,14 @@ class FakePayments:
 
     def ensure_customer(self, uid: str, existing_customer_id: str) -> str:
         return existing_customer_id or f"cus_fake_{uid}"
+
+    def create_setup_intent(self, customer_id: str) -> SetupIntentBundle:
+        n = next(self._n)
+        return SetupIntentBundle(
+            customer_id=customer_id,
+            setup_intent_client_secret=f"seti_fake_{n}_secret",
+            ephemeral_key_secret=f"ek_fake_{n}",
+        )
 
     def charge_rental(self, customer_id, amount_cents, booking_id) -> PaymentResult:
         if self.fail_next_charge:
@@ -103,6 +121,18 @@ class StripePayments:
             return existing_customer_id
         customer = self.stripe.Customer.create(metadata={"uid": uid})
         return customer.id
+
+    def create_setup_intent(self, customer_id: str) -> SetupIntentBundle:
+        setup = self.stripe.SetupIntent.create(customer=customer_id, usage="off_session")
+        # Ephemeral key lets the mobile PaymentSheet act as this customer.
+        key = self.stripe.EphemeralKey.create(
+            customer=customer_id, stripe_version="2024-06-20"
+        )
+        return SetupIntentBundle(
+            customer_id=customer_id,
+            setup_intent_client_secret=setup.client_secret,
+            ephemeral_key_secret=key.secret,
+        )
 
     def _default_pm(self, customer_id: str) -> Optional[str]:
         pms = self.stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)

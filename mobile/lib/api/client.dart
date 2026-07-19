@@ -250,4 +250,45 @@ class ApiClient {
         'lat': lat,
         'lng': lng,
       }));
+
+  Future<KitCheckoutResult> kitCheckout(
+          List<String> listingIds, String start, String end) async =>
+      KitCheckoutResult.fromJson(await _req('POST', '/v1/projects/checkout', {
+        'listing_ids': listingIds,
+        'start_date': start,
+        'end_date': end,
+      }));
+
+  // Payments: everything the Stripe PaymentSheet needs to save a card.
+  Future<SetupIntentBundle> setupIntent() async =>
+      SetupIntentBundle.fromJson(await _req('POST', '/v1/users/me/setup-intent'));
+
+  // Called after returning from Stripe Connect onboarding; sweeps pending payouts.
+  Future<int> completeConnectOnboarding() async =>
+      (await _req('POST', '/v1/users/me/connect/complete'))['total_cents'];
+}
+
+class KitCheckoutResult {
+  final int requested;
+  final int failed;
+  final List<String> errors;
+
+  KitCheckoutResult.fromJson(Map<String, dynamic> j)
+      : requested = j['requested'],
+        failed = j['failed'],
+        errors = [
+          for (final item in j['items'] as List)
+            if ((item['error'] as String).isNotEmpty) item['error'] as String,
+        ];
+}
+
+class SetupIntentBundle {
+  final String customerId;
+  final String setupIntentClientSecret;
+  final String ephemeralKeySecret;
+
+  SetupIntentBundle.fromJson(Map<String, dynamic> j)
+      : customerId = j['customer_id'],
+        setupIntentClientSecret = j['setup_intent_client_secret'],
+        ephemeralKeySecret = j['ephemeral_key_secret'];
 }

@@ -17,7 +17,39 @@ class _ProjectKitScreenState extends State<ProjectKitScreen> {
   final _controller = TextEditingController();
   ProjectKit? _kit;
   bool _loading = false;
+  bool _checkingOut = false;
   String _error = '';
+
+  String _isoFromNow(int days) =>
+      DateTime.now().add(Duration(days: days)).toIso8601String().substring(0, 10);
+
+  List<String> get _rentableListingIds => [
+        for (final item in _kit?.kit ?? <KitItem>[])
+          if (item.matches.isNotEmpty) item.matches.first.id,
+      ];
+
+  Future<void> _checkoutKit() async {
+    setState(() => _checkingOut = true);
+    try {
+      // MVP: whole kit for tomorrow. A shared date picker is a fast-follow.
+      final result = await ApiClient.instance
+          .kitCheckout(_rentableListingIds, _isoFromNow(1), _isoFromNow(1));
+      if (!mounted) return;
+      final message = result.failed == 0
+          ? 'Requested ${result.requested} tools — owners have 24h to accept. '
+              'Track them in the Rentals tab.'
+          : '${result.requested} requested, ${result.failed} unavailable: '
+              '${result.errors.join('; ')}';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Checkout failed: $e')));
+    } finally {
+      setState(() => _checkingOut = false);
+    }
+  }
 
   Future<void> _plan() async {
     final description = _controller.text.trim();
@@ -90,6 +122,18 @@ class _ProjectKitScreenState extends State<ProjectKitScreen> {
               ),
             const SizedBox(height: 8),
             for (final item in kit.kit) _KitTile(item: item),
+            if (_rentableListingIds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: FilledButton.icon(
+                  onPressed: _checkingOut ? null : _checkoutKit,
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text(_checkingOut
+                      ? 'Requesting kit…'
+                      : 'Request whole kit '
+                        '(${_rentableListingIds.length} tools, tomorrow)'),
+                ),
+              ),
             if (kit.missingTools.isNotEmpty)
               Card(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
