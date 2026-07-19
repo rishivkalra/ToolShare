@@ -157,6 +157,7 @@ class FakePlanner:
 
 
 def build_planner(env: str, api_key: str) -> ProjectPlanner:
-    if env == "prod" or api_key:
+    """Claude when a key is configured; keyword fake otherwise (dev/staging)."""
+    if api_key:
         return ClaudePlanner(api_key)
     return FakePlanner()

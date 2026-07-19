@@ -35,7 +35,7 @@ def current_uid(request: Request, settings: Settings = Depends(get_settings)) ->
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = header.removeprefix("Bearer ").strip()
 
-    if settings.env == "dev" and settings.dev_auth_enabled and token.startswith("dev:"):
+    if settings.dev_auth_active and token.startswith("dev:"):
         return token.removeprefix("dev:")
 
     try:

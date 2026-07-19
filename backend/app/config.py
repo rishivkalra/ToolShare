@@ -39,8 +39,16 @@ class Settings(BaseSettings):
     # Shared secret for /internal/tasks/* handlers; empty in dev = check skipped.
     internal_task_secret: str = ""
 
-    # Dev-only: bearer token accepted as "user:<uid>" without Firebase.
-    dev_auth_enabled: bool = True
+    # Accept "dev:<uid>" bearer tokens without Firebase. None = auto (enabled
+    # only when env=dev). Set explicitly to true for a staging deploy and to
+    # false at public launch.
+    dev_auth_enabled: bool | None = None
+
+    @property
+    def dev_auth_active(self) -> bool:
+        if self.dev_auth_enabled is None:
+            return self.env == "dev"
+        return self.dev_auth_enabled
 
     model_config = {"env_prefix": "TOOLSHARE_"}
 

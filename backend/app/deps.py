@@ -42,21 +42,32 @@ def build_container(settings: Settings) -> Container:
         db = firestore.Client(
             project=settings.gcp_project or None, database=settings.firestore_database
         )
+        # Graceful staging fallbacks: real Stripe/Cloud Tasks only when
+        # configured, so the service boots and is testable before launch keys
+        # exist. FakePayments in prod means NO REAL CHARGES — staging only.
+        if settings.stripe_secret_key:
+            payments = StripePayments(settings.stripe_secret_key, settings.service_base_url)
+        else:
+            payments = FakePayments()
+        if settings.tasks_queue and settings.service_base_url:
+            tasks = CloudTasksScheduler(
+                settings.gcp_project,
+                settings.tasks_location,
+                settings.tasks_queue,
+                settings.service_base_url,
+                settings.internal_task_secret,
+            )
+        else:
+            tasks = FakeScheduler()
         return Container(
             users=FirestoreUserRepo(db),
             listings=FirestoreListingRepo(db),
             bookings=FirestoreBookingRepo(db),
             messages=FirestoreMessageRepo(db),
             reviews=FirestoreReviewRepo(db),
-            payments=StripePayments(settings.stripe_secret_key, settings.service_base_url),
+            payments=payments,
             planner=build_planner(settings.env, settings.anthropic_api_key),
-            tasks=CloudTasksScheduler(
-                settings.gcp_project,
-                settings.tasks_location,
-                settings.tasks_queue,
-                settings.service_base_url,
-                settings.internal_task_secret,
-            ),
+            tasks=tasks,
         )
 
     from .repos.memory import (
