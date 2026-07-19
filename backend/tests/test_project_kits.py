@@ -71,3 +71,20 @@ def test_project_kit_requires_auth(client):
         json={"description": "Build a deck out back", "lat": 37.0, "lng": -122.0},
     )
     assert resp.status_code == 401
+
+
+def test_gemini_response_parsing():
+    from app.services.project_planner import GeminiPlanner
+
+    payload = {
+        "candidates": [{
+            "content": {"parts": [{"text": '{"project_summary": "Build a raised garden bed",'
+                                           ' "tools": [{"name": "circular saw", "category": "power_tools",'
+                                           ' "why": "Cut lumber", "optional": false}],'
+                                           ' "consumables_note": "Buy lumber and screws.",'
+                                           ' "safety_note": "Wear eye protection."}'}]}
+        }]
+    }
+    plan = GeminiPlanner.parse_response(payload)
+    assert plan.tools[0].name == "circular saw"
+    assert plan.tools[0].category.value == "power_tools"

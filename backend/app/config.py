@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
 
-    # Enables the Claude-backed project planner. Empty in dev = keyword fake.
+    # Project-planner backend: "auto" (Claude if key set, else keyword fake),
+    # "gemini" (Vertex AI via the service's own GCP identity — no key needed),
+    # or "claude".
+    planner: str = "auto"
+    gemini_model: str = "gemini-2.5-flash"
     anthropic_api_key: str = ""
 
     # Borrower-side service fee.

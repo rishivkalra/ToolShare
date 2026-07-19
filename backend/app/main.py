@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
+from fastapi.responses import RedirectResponse
 
 from .config import get_settings
 from .routers import bookings, internal, listings, messages, projects, reviews, users
@@ -22,3 +23,14 @@ app.include_router(internal.router)
 @app.get("/health", tags=["ops"])
 def healthz():
     return {"ok": True, "env": get_settings().env}
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Browser-friendly landing: send visitors to the interactive API docs."""
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)

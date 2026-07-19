@@ -241,6 +241,7 @@ def run_env(project_id: str, base_url: str) -> list[dict]:
         "TOOLSHARE_TASKS_LOCATION": REGION,
         "TOOLSHARE_INTERNAL_TASK_SECRET": state["internal_secret"],
         "TOOLSHARE_DEV_AUTH_ENABLED": "true",  # STAGING ONLY — false at launch
+        "TOOLSHARE_PLANNER": "gemini",  # Vertex AI via service identity, no key
         "TOOLSHARE_SERVICE_BASE_URL": base_url,
     }
     return [{"name": k, "value": v} for k, v in env.items()]

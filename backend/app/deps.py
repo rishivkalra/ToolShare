@@ -66,7 +66,9 @@ def build_container(settings: Settings) -> Container:
             messages=FirestoreMessageRepo(db),
             reviews=FirestoreReviewRepo(db),
             payments=payments,
-            planner=build_planner(settings.env, settings.anthropic_api_key),
+            planner=build_planner(settings.env, settings.anthropic_api_key,
+                                  settings.planner, settings.gcp_project,
+                                  settings.gemini_model),
             tasks=tasks,
         )
 
@@ -85,7 +87,9 @@ def build_container(settings: Settings) -> Container:
         messages=MemoryMessageRepo(),
         reviews=MemoryReviewRepo(),
         payments=FakePayments(),
-        planner=build_planner(settings.env, settings.anthropic_api_key),
+        planner=build_planner(settings.env, settings.anthropic_api_key,
+                                  settings.planner, settings.gcp_project,
+                                  settings.gemini_model),
         tasks=FakeScheduler(),
     )
 

@@ -5,13 +5,15 @@ produce a structured list of the tools the job needs. The bookings router then
 matches that list against listings actually available in the neighborhood, so
 the user sees a one-tap rentable kit plus any gaps.
 
-`ClaudePlanner` calls the Anthropic API with a structured-output schema.
-`FakePlanner` is a deterministic keyword matcher for dev/tests (no API key,
-no network).
+Backends (selected by `build_planner`):
+- `GeminiPlanner` — Vertex AI Gemini with a JSON response schema. Uses the
+  service's own Google credentials (ADC) — no API key required on GCP.
+- `ClaudePlanner` — Anthropic API with structured outputs (needs an API key).
+- `FakePlanner` — deterministic keyword matcher for dev/tests (no network).
 """
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +56,82 @@ class ProjectPlan(BaseModel):
 
 class ProjectPlanner(Protocol):
     def plan(self, description: str) -> ProjectPlan: ...
+
+
+# Vertex AI response schema (OpenAPI subset) mirroring ProjectPlan.
+_GEMINI_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "project_summary": {"type": "STRING"},
+        "tools": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name": {"type": "STRING"},
+                    "category": {
+                        "type": "STRING",
+                        "enum": [c.value for c in ToolCategory],
+                    },
+                    "why": {"type": "STRING"},
+                    "optional": {"type": "BOOLEAN"},
+                },
+                "required": ["name", "category", "why"],
+            },
+        },
+        "consumables_note": {"type": "STRING"},
+        "safety_note": {"type": "STRING"},
+    },
+    "required": ["project_summary", "tools"],
+}
+
+
+class GeminiPlanner:
+    """Vertex AI Gemini via REST with ADC — no API key needed on GCP."""
+
+    def __init__(self, project: str, region: str = "us-central1",
+                 model: str = "gemini-2.5-flash"):
+        import google.auth
+
+        self._creds, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        self.url = (
+            f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}"
+            f"/locations/{region}/publishers/google/models/{model}:generateContent"
+        )
+
+    def _token(self) -> str:
+        import google.auth.transport.requests
+
+        if not self._creds.valid:
+            self._creds.refresh(google.auth.transport.requests.Request())
+        return self._creds.token
+
+    def plan(self, description: str) -> ProjectPlan:
+        import httpx
+
+        resp = httpx.post(
+            self.url,
+            headers={"Authorization": f"Bearer {self._token()}"},
+            json={
+                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                "contents": [{"role": "user", "parts": [{"text": description}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": _GEMINI_SCHEMA,
+                    "temperature": 0.2,
+                },
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return self.parse_response(resp.json())
+
+    @staticmethod
+    def parse_response(payload: dict) -> ProjectPlan:
+        text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        return ProjectPlan.model_validate_json(text)
 
 
 class ClaudePlanner:
@@ -156,8 +234,16 @@ class FakePlanner:
         )
 
 
-def build_planner(env: str, api_key: str) -> ProjectPlanner:
-    """Claude when a key is configured; keyword fake otherwise (dev/staging)."""
-    if api_key:
+def build_planner(env: str, api_key: str, backend: str = "auto",
+                  gcp_project: str = "", gemini_model: str = "gemini-2.5-flash") -> ProjectPlanner:
+    """Pick the planner backend.
+
+    backend="gemini": Vertex AI Gemini via the service's own GCP identity.
+    backend="claude" (or auto + key): Anthropic API.
+    otherwise: deterministic keyword fake (dev/staging without AI).
+    """
+    if backend == "gemini" and gcp_project:
+        return GeminiPlanner(gcp_project, model=gemini_model)
+    if backend == "claude" or (backend == "auto" and api_key):
         return ClaudePlanner(api_key)
     return FakePlanner()
