@@ -37,8 +37,14 @@ Interactive API docs: http://localhost:8080/docs
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m pytest tests/ -q          # 31 unit/API tests
+.venv/bin/python scripts/e2e_demo.py          # full acceptance run over real HTTP
 ```
+
+`e2e_demo.py` boots the server itself and drives all 15 product flows end to
+end (listing, search, AI kit, kit checkout, payment setup, approve/charge,
+privacy, chat, handoff, return, payout sweep, reviews, expiry job). Run it
+before any deploy — exit code 0 means the stack is release-ready.
 
 ## Deploy to Cloud Run
 
