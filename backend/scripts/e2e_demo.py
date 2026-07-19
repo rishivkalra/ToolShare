@@ -197,7 +197,7 @@ if __name__ == "__main__":
     try:
         for _ in range(50):
             try:
-                if httpx.get(f"{BASE}/healthz", timeout=1).status_code == 200:
+                if httpx.get(f"{BASE}/health", timeout=1).status_code == 200:
                     break
             except httpx.HTTPError:
                 time.sleep(0.2)

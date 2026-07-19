@@ -7,7 +7,7 @@ B='Authorization: Bearer dev:smoketest_borrower'
 L='Authorization: Bearer dev:smoketest_lender'
 
 echo "== healthz"
-curl -sfS "$URL/healthz"; echo
+curl -sfS "$URL/health"; echo
 
 echo "== create listing (Firestore write)"
 LID=$(curl -sfS -X POST "$URL/v1/listings" -H "$L" -H "$H" -d '{

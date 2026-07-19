@@ -19,6 +19,6 @@ app.include_router(projects.router)
 app.include_router(internal.router)
 
 
-@app.get("/healthz", tags=["ops"])
+@app.get("/health", tags=["ops"])
 def healthz():
     return {"ok": True, "env": get_settings().env}
