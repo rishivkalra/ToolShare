@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     # false at public launch.
     dev_auth_enabled: bool | None = None
 
+    # Google Sign-In (web landing page). The OAuth 2.0 Web client id from the
+    # Cloud Console credentials page; empty disables the Google button.
+    google_client_id: str = ""
+    # Signs first-party session tokens; falls back to the internal task secret
+    # so staging needs no extra config. Rotating it signs everyone out.
+    session_secret: str = ""
+
+    @property
+    def session_signing_key(self) -> str:
+        return self.session_secret or self.internal_task_secret or "toolshare-dev-sessions"
+
     @property
     def dev_auth_active(self) -> bool:
         if self.dev_auth_enabled is None:

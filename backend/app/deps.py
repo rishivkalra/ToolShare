@@ -12,6 +12,7 @@ from .repos.base import (
     ReviewRepo,
     UserRepo,
 )
+from .services.google_auth import GoogleVerifier, build_verifier
 from .services.payments import FakePayments, PaymentProvider
 from .services.photos import GcsPhotoStore, MemoryPhotoStore, PhotoStore
 from .services.project_planner import ProjectPlanner, build_planner
@@ -30,6 +31,7 @@ class Container:
     planner: ProjectPlanner
     tasks: TaskScheduler
     photos: PhotoStore
+    google_auth: GoogleVerifier | None
 
 
 _container: Container | None = None
@@ -84,6 +86,7 @@ def build_container(settings: Settings) -> Container:
             tasks=tasks,
             photos=GcsPhotoStore(settings.photos_bucket)
             if settings.photos_bucket else MemoryPhotoStore(),
+            google_auth=build_verifier(settings.env, settings.google_client_id),
         )
 
     from .repos.memory import (
@@ -108,6 +111,7 @@ def build_container(settings: Settings) -> Container:
                                   settings.gemini_model),
         tasks=FakeScheduler(),
         photos=MemoryPhotoStore(),
+        google_auth=build_verifier(settings.env, settings.google_client_id),
     )
 
 

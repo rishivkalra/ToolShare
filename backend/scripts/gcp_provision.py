@@ -268,6 +268,10 @@ def run_env(project_id: str, base_url: str) -> list[dict]:
         "TOOLSHARE_PHOTOS_BUCKET": f"{project_id}-photos",
         "TOOLSHARE_SERVICE_BASE_URL": base_url,
     }
+    # Set once via: gcp_provision.py --google-client-id <id>.apps.googleusercontent.com
+    # (creating the OAuth Web client itself is a one-time Cloud Console step).
+    if state.get("google_client_id"):
+        env["TOOLSHARE_GOOGLE_CLIENT_ID"] = state["google_client_id"]
     return [{"name": k, "value": v} for k, v in env.items()]
 
 
@@ -339,6 +343,9 @@ def main():
     billing = None
     if "--billing" in sys.argv:
         billing = sys.argv[sys.argv.index("--billing") + 1]
+    if "--google-client-id" in sys.argv:
+        state["google_client_id"] = sys.argv[sys.argv.index("--google-client-id") + 1]
+        save_state()
     project_id = ensure_project()
     if billing:
         ensure_billing(project_id, billing)

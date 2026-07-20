@@ -144,7 +144,8 @@ def complete_connect_onboarding(
 @router.get("/{uid}", response_model=UserProfile)
 def public_profile(uid: str, c: Container = Depends(get_container)):
     user = c.users.get(uid) or UserProfile(uid=uid)
-    # Strip payment identifiers from public view.
+    # Strip payment identifiers and contact info from public view.
     user.stripe_customer_id = ""
     user.stripe_connect_id = ""
+    user.email = ""
     return user

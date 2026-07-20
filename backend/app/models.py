@@ -56,6 +56,7 @@ TERMINAL_STATES = {
 class UserProfile(BaseModel):
     uid: str
     display_name: str = ""
+    email: str = ""  # from Google Sign-In; never shown on public profiles
     photo_url: str = ""
     bio: str = ""
     phone_verified: bool = False

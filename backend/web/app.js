@@ -21,15 +21,22 @@ const STATE_LABEL = {
 const store = {
   get uid() { return localStorage.getItem("ts_uid") || "demo"; },
   set uid(v) { localStorage.setItem("ts_uid", v); },
+  // Session token from Google Sign-In on the landing page; when absent we
+  // fall back to the staging dev:<uid> identity.
+  get token() { return localStorage.getItem("ts_token") || ""; },
   loc: { ...DEMO_LOC, usingDemo: true },
   profiles: {},   // uid -> public profile cache
   photoBlob: null, // pending listing photo
 };
 
+function authHeader() {
+  return `Bearer ${store.token || "dev:" + store.uid}`;
+}
+
 async function api(method, path, body) {
   const resp = await fetch(path, {
     method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer dev:${store.uid}` },
+    headers: { "Content-Type": "application/json", Authorization: authHeader() },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return handleResp(resp);
@@ -40,7 +47,7 @@ async function apiUpload(path, blob, filename) {
   form.append("file", blob, filename);
   const resp = await fetch(path, {
     method: "POST",
-    headers: { Authorization: `Bearer dev:${store.uid}` },
+    headers: { Authorization: authHeader() },
     body: form,
   });
   return handleResp(resp);
@@ -48,6 +55,11 @@ async function apiUpload(path, blob, filename) {
 
 async function handleResp(resp) {
   const data = resp.status === 204 ? null : await resp.json().catch(() => null);
+  if (resp.status === 401 && store.token) {
+    localStorage.removeItem("ts_token");
+    location.href = "/";  // session expired — back to the landing sign-in
+    return null;
+  }
   if (!resp.ok) {
     const detail = data && data.detail
       ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))
@@ -528,6 +540,9 @@ async function loadProfile() {
     const p = await api("GET", "/v1/users/me");
     const name = p.display_name || p.uid;
     $("#profile-name").textContent = name;
+    $("#profile-email").textContent = p.email || (store.token ? "" : "Demo identity — staging only");
+    $("#whoami-name").textContent = name;
+    $("#whoami-dot").textContent = initial(name);
     $("#profile-avatar").textContent = initial(name);
     $("#profile-rating").textContent = p.rating_count > 0
       ? `★ ${p.rating_avg} · ${p.rating_count} review${p.rating_count > 1 ? "s" : ""}`
@@ -642,6 +657,7 @@ async function addPaymentMethod() {
 function switchUser() {
   const v = $("#uid-input").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
   if (!v) return;
+  localStorage.removeItem("ts_token");  // demo identities replace a Google session
   store.uid = v;
   openBooking = null;
   toast(`You're now ${v}`);
@@ -662,6 +678,11 @@ function boot() {
   $("#uid-input").addEventListener("keydown", (e) => { if (e.key === "Enter") switchUser(); });
   $("#whoami").onclick = () => { location.hash = "#/profile"; };
   $("#save-profile-btn").onclick = saveProfile;
+  $("#signout-btn").onclick = () => {
+    localStorage.removeItem("ts_token");
+    localStorage.removeItem("ts_uid");
+    location.href = "/";
+  };
   $("#pay-btn").onclick = addPaymentMethod;
   $("#connect-btn").onclick = async () => {
     try {

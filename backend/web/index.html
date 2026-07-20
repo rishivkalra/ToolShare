@@ -121,6 +121,7 @@
           <div class="avatar" id="profile-avatar">?</div>
           <div style="flex:1">
             <div class="profile-name" id="profile-name">…</div>
+            <div class="profile-rating" id="profile-email" style="font-size:12.5px"></div>
             <div class="profile-rating" id="profile-rating"></div>
           </div>
         </div>
@@ -131,8 +132,11 @@
         <label style="font-weight:700;font-size:14px;display:block;margin-top:12px">Bio <span class="opt">shown to neighbors</span>
           <textarea id="bio-input" rows="2" placeholder="e.g. Woodworker on Oak Ave. Happy to demo any tool!" style="margin-top:6px;font-weight:400"></textarea>
         </label>
-        <div style="margin-top:12px"><button class="btn" id="save-profile-btn">Save profile</button></div>
-        <label class="switcher">Demo sign-in <span class="opt">staging only — Sign in with Apple/Google at launch</span>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="save-profile-btn">Save profile</button>
+          <button class="btn" id="signout-btn">Sign out</button>
+        </div>
+        <label class="switcher">Demo sign-in <span class="opt">staging only — or use Google sign-in from the home page</span>
           <div class="searchrow">
             <input id="uid-input" placeholder="your name, e.g. maya">
             <button class="btn" id="uid-btn">Switch</button>

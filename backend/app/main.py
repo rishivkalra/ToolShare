@@ -1,11 +1,21 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .routers import bookings, internal, listings, messages, projects, reports, reviews, users
+from .routers import (
+    auth,
+    bookings,
+    internal,
+    listings,
+    messages,
+    projects,
+    reports,
+    reviews,
+    users,
+)
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -16,6 +26,7 @@ app = FastAPI(
     "to each other for a few dollars a day.",
 )
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(listings.router)
 app.include_router(bookings.router)
@@ -34,7 +45,10 @@ def healthz():
 
 @app.get("/", include_in_schema=False)
 def root():
-    """Browser landing: the web app if bundled, else the API docs."""
+    """Consumer landing page; falls back to the app, then the API docs."""
+    landing = WEB_DIR / "landing.html"
+    if landing.exists():
+        return FileResponse(landing)
     return RedirectResponse(url="/app/" if WEB_DIR.exists() else "/docs")
 
 

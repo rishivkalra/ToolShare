@@ -34,6 +34,21 @@ curl -s -X POST localhost:8080/v1/bookings/<booking id>/approve \
 
 Interactive API docs: http://localhost:8080/docs
 
+## Web frontend & Google sign-in
+
+- `/` serves the consumer landing page (`web/landing.html`); the SPA lives at
+  `/app/`.
+- The landing page renders the official **Sign in with Google** button when
+  `TOOLSHARE_GOOGLE_CLIENT_ID` is set. The Google ID token is verified
+  server-side (`POST /v1/auth/google`) and exchanged for a signed, stateless
+  session token (`st1.…`) that the SPA sends as its bearer.
+- Creating the OAuth client is a one-time Cloud Console step (APIs & Services →
+  Credentials → OAuth client ID → Web application; add the Cloud Run URL to
+  both authorized JavaScript origins and redirect URIs). Then redeploy with
+  `python scripts/gcp_provision.py --google-client-id <id>`.
+- Without a client id, dev/staging falls back to demo identities so the whole
+  product stays explorable.
+
 ## Tests
 
 ```bash

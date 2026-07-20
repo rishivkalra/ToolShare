@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ToolShare — rent any tool from a neighbor for a few dollars a day</title>
+<meta name="description" content="The tool library your street already owns. Rent drills, saws, ladders and more from verified neighbors for $5–10/day — deposits held safely, AI plans your whole project kit.">
+<meta property="og:title" content="ToolShare — every tool on your street, one tap away">
+<meta property="og:description" content="Rent idle tools from neighbors for a few dollars a day. Verified profiles, deposit protection, AI project kits.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app/landing.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="3" y="13" width="26" height="16" rx="3" fill="#0E7A46"/>
+      <path d="M4 14 16 4l12 10" fill="none" stroke="#0E7A46" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M12 22h8M16 18v8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+    <span>ToolShare</span>
+  </a>
+  <nav class="topnav" aria-label="Landing sections">
+    <a href="#how">How it works</a>
+    <a href="#kits">Project kits</a>
+    <a href="#lenders">For lenders</a>
+    <a href="#safety">Safety</a>
+  </nav>
+  <div class="nav-cta">
+    <a class="btn btn-ghost" href="/app/#/browse">Open the app</a>
+    <div class="gsi-slot" id="gsi-nav"></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero-wrap">
+    <div class="hero-copy">
+      <span class="kicker">🏡 Your street already owns every tool you need</span>
+      <h1>Borrow the tool.<br><em>Skip the purchase.</em></h1>
+      <p class="lede">The average power drill is used for <b>12 minutes</b> in its entire life —
+        yet every garage on the block buys one. ToolShare lets neighbors rent each other's
+        idle tools for <b>$5–10 a day</b>, with deposits, verified profiles and payments
+        handled for you.</p>
+      <div class="cta-row">
+        <div class="gsi-slot gsi-big" id="gsi-hero"></div>
+        <a class="btn btn-ghost btn-big" href="/app/#/browse">Browse tools near you →</a>
+      </div>
+      <p class="trust-row">
+        <span>🔒 Deposits held by Stripe</span>
+        <span>⭐ Two-sided reviews</span>
+        <span>📍 Hyperlocal — pickup is a short walk</span>
+      </p>
+    </div>
+
+    <div class="hero-visual" aria-hidden="true">
+      <div class="hv-card hv-1">
+        <div class="hv-img wash-a"><span>🪚</span></div>
+        <div class="hv-body"><b>DeWalt circular saw</b><small>0.2 mi · Maya R. ★ 4.9</small></div>
+        <div class="pricepill">$8<small>/day</small></div>
+      </div>
+      <div class="hv-card hv-2">
+        <div class="hv-img wash-b"><span>🪜</span></div>
+        <div class="hv-body"><b>8 ft step ladder</b><small>0.4 mi · Raj P. ★ 5.0</small></div>
+        <div class="pricepill">$6<small>/day</small></div>
+      </div>
+      <div class="hv-card hv-3">
+        <div class="hv-img wash-c"><span>🔨</span></div>
+        <div class="hv-body"><b>20V cordless drill kit</b><small>1 block away · Ana L. ★ 4.8</small></div>
+        <div class="pricepill">$7<small>/day</small></div>
+      </div>
+      <div class="hv-chip hv-chip-1">💳 Deposit held → released on return</div>
+      <div class="hv-chip hv-chip-2">✨ AI kit: raised garden bed · 6 tools matched</div>
+    </div>
+  </section>
+
+  <!-- ================= STATS ================= -->
+  <section class="stats-band">
+    <div class="stat"><div class="num">80%</div><div class="lbl">of power tools are used less than once a year after purchase</div></div>
+    <div class="stat"><div class="num">$5–10</div><div class="lbl">a day to borrow instead of $80–700 to buy</div></div>
+    <div class="stat"><div class="num">100%</div><div class="lbl">of the listed price goes to the tool's owner</div></div>
+    <div class="stat"><div class="num">1 walk</div><div class="lbl">typical pickup distance — it's your own neighborhood</div></div>
+  </section>
+
+  <!-- ================= HOW IT WORKS ================= -->
+  <section id="how" class="section">
+    <span class="kicker">How it works</span>
+    <h2>From “I need a saw”<br><em>to sawing, in an afternoon.</em></h2>
+    <div class="col3">
+      <div class="step">
+        <div class="step-num wash-a">1</div>
+        <h3>Find it next door</h3>
+        <p>Search what neighbors within walking distance have listed. Photos, daily
+           prices and owner ratings up front — exact addresses stay private until
+           you're booked.</p>
+      </div>
+      <div class="step">
+        <div class="step-num wash-b">2</div>
+        <h3>Book &amp; pay in the app</h3>
+        <p>Request the dates; the owner taps approve. Your card is charged for the
+           rental and a refundable deposit is <em>held, not taken</em> — it backs the
+           tool while it's in your hands.</p>
+      </div>
+      <div class="step">
+        <div class="step-num wash-c">3</div>
+        <h3>Meet, make, return</h3>
+        <p>Pick it up, build the thing, hand it back. Both sides confirm the handoff,
+           the deposit hold is released, the owner gets paid, and you both leave a
+           review.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PROJECT KITS ================= -->
+  <section id="kits" class="section split">
+    <div class="split-copy">
+      <span class="kicker">✨ Powered by Gemini</span>
+      <h2>Don't know what tools<br>you need? <em>We do.</em></h2>
+      <p class="lede">Describe the project in plain words — “build a raised garden bed”,
+         “mount a TV on brick” — and ToolShare plans the complete tool list, then matches
+         every item against what your neighbors actually have. One tap rents the whole kit.</p>
+      <a class="btn btn-primary btn-big" href="/app/#/project">Try a project kit</a>
+    </div>
+    <div class="kit-demo" aria-hidden="true">
+      <div class="kit-q">“I want to build a raised garden bed in my backyard”</div>
+      <div class="kit-items">
+        <div class="kit-item"><span>🪚</span> Circular saw <b class="ok">✓ 0.2 mi</b></div>
+        <div class="kit-item"><span>🔨</span> Cordless drill <b class="ok">✓ 1 block</b></div>
+        <div class="kit-item"><span>📏</span> Speed square <b class="ok">✓ 0.3 mi</b></div>
+        <div class="kit-item"><span>🌱</span> Garden tiller <b class="ok">✓ 0.6 mi</b></div>
+        <div class="kit-item"><span>🧰</span> Clamp set <b class="ok">✓ 0.4 mi</b></div>
+      </div>
+      <div class="kit-total">Whole kit · 2 days · <b>$54</b> <small>vs $610 to buy</small></div>
+    </div>
+  </section>
+
+  <!-- ================= FOR LENDERS ================= -->
+  <section id="lenders" class="section split flip">
+    <div class="split-copy">
+      <span class="kicker">For tool owners</span>
+      <h2>Your garage is<br><em>an asset.</em></h2>
+      <p class="lede">List a tool in under a minute. You set the price and approve every
+         request — borrowers pay the service fee, so <b>100% of your listed price is
+         yours</b>. Every rental is backed by the borrower's card on file and a deposit
+         hold you choose.</p>
+      <a class="btn btn-primary btn-big" href="/app/#/list">List your first tool</a>
+    </div>
+    <div class="earn-demo" aria-hidden="true">
+      <div class="earn-row"><span class="earn-tool">🔨 Drill kit</span><span class="earn-math">$7/day × 5 days/mo</span><b>$35</b></div>
+      <div class="earn-row"><span class="earn-tool">🪜 Ladder</span><span class="earn-math">$6/day × 4 days/mo</span><b>$24</b></div>
+      <div class="earn-row"><span class="earn-tool">🧽 Pressure washer</span><span class="earn-math">$12/day × 6 days/mo</span><b>$72</b></div>
+      <div class="earn-total"><span>Idle garage, working for you</span><b>$131/mo</b></div>
+    </div>
+  </section>
+
+  <!-- ================= SAFETY ================= -->
+  <section id="safety" class="section">
+    <span class="kicker">🛡️ Built-in trust</span>
+    <h2>Safe for the borrower.<br><em>Safer for the owner.</em></h2>
+    <div class="col3 safety-grid">
+      <div class="safe"><span>💳</span><h3>Card on file, always</h3><p>No one can request a rental without a verified payment method — every borrower is financially accountable from the first tap.</p></div>
+      <div class="safe"><span>🔒</span><h3>Deposit holds</h3><p>The deposit is authorized on the borrower's card and held by Stripe — released on safe return, captured only if damage is reported.</p></div>
+      <div class="safe"><span>📍</span><h3>Address privacy</h3><p>Listings show approximate location only. Your exact address is revealed solely to a paid, confirmed borrower.</p></div>
+      <div class="safe"><span>🤝</span><h3>Two-sided handoffs</h3><p>Pickup and return are confirmed by both parties, with day counters, overdue flags and a full audit trail on every rental.</p></div>
+      <div class="safe"><span>⭐</span><h3>Reputation that matters</h3><p>Mutual reviews after every rental build a neighborhood-visible track record for borrowers and owners alike.</p></div>
+      <div class="safe"><span>🚨</span><h3>Report anything</h3><p>Flag a listing, user or booking in two taps — every report is reviewed, and payments stay held while we look into it.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= TESTIMONIALS ================= -->
+  <section class="section">
+    <span class="kicker">Neighbors talking</span>
+    <h2>The block gets <em>friendlier.</em></h2>
+    <div class="col3">
+      <figure class="quote">
+        <blockquote>“I needed a tile saw for one weekend. Bought new it's $300 — I paid $18, and Marco showed me how to use it.”</blockquote>
+        <figcaption><span class="qdot wash-a">D</span> Dana · borrowed 7 tools</figcaption>
+      </figure>
+      <figure class="quote">
+        <blockquote>“My pressure washer sat in the shed 360 days a year. It's paid for itself twice over since spring.”</blockquote>
+        <figcaption><span class="qdot wash-b">M</span> Maya · earns ~$70/mo</figcaption>
+      </figure>
+      <figure class="quote">
+        <blockquote>“The AI kit listed six tools for my garden bed. Five were within two blocks. Done by Sunday.”</blockquote>
+        <figcaption><span class="qdot wash-c">R</span> Raj · first project</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ================= FINAL CTA ================= -->
+  <section class="cta-band">
+    <h2>The tool library your street<br>already owns.</h2>
+    <p>Sign in with Google and see what's in your neighbors' garages.</p>
+    <div class="cta-row center">
+      <div class="gsi-slot gsi-big" id="gsi-cta"></div>
+      <a class="btn btn-white btn-big" href="/app/#/browse">Browse without signing in</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div>
+    <span class="brand-min">🛠️ ToolShare</span>
+    <p>Less wastage. Fewer repeat purchases.<br>More neighbors who know each other.</p>
+  </div>
+  <nav aria-label="Footer">
+    <a href="#how">How it works</a>
+    <a href="#kits">Project kits</a>
+    <a href="#lenders">For lenders</a>
+    <a href="#safety">Safety</a>
+    <a href="/docs">API</a>
+  </nav>
+  <small id="foot-note">© 2026 ToolShare · Payments &amp; deposits processed by Stripe</small>
+</footer>
+
+<div id="toast-root"></div>
+<script src="/app/landing.js"></script>
+</body>
+</html>
