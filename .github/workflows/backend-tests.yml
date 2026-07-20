@@ -20,6 +20,6 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install fastapi "uvicorn[standard]" pydantic pydantic-settings httpx pytest
+          pip install fastapi "uvicorn[standard]" pydantic pydantic-settings httpx pytest python-multipart
       - name: Run tests
         run: python -m pytest tests/ -q
