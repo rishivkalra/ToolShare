@@ -10,6 +10,8 @@ from ..models import (
     BookingState,
     Listing,
     Message,
+    Notification,
+    PushSubscription,
     Report,
     Review,
     TERMINAL_STATES,
@@ -142,3 +144,39 @@ class MemoryReportRepo:
     def create(self, report: Report) -> Report:
         self.reports.append(report)
         return report
+
+
+class MemoryNotificationRepo:
+    def __init__(self):
+        self.items: list[Notification] = []
+
+    def create(self, notification: Notification) -> Notification:
+        self.items.append(notification)
+        return notification
+
+    def for_user(self, uid: str, limit: int = 50) -> list[Notification]:
+        mine = [n for n in self.items if n.uid == uid]
+        mine.sort(key=lambda n: n.created_at or 0, reverse=True)
+        return mine[:limit]
+
+    def mark_all_read(self, uid: str) -> int:
+        count = 0
+        for n in self.items:
+            if n.uid == uid and not n.read:
+                n.read = True
+                count += 1
+        return count
+
+
+class MemoryPushSubRepo:
+    def __init__(self):
+        self.subs: dict[tuple[str, str], PushSubscription] = {}
+
+    def upsert(self, sub: PushSubscription) -> None:
+        self.subs[(sub.uid, sub.endpoint)] = sub
+
+    def for_user(self, uid: str) -> list[PushSubscription]:
+        return [s for (u, _), s in self.subs.items() if u == uid]
+
+    def remove(self, uid: str, endpoint: str) -> None:
+        self.subs.pop((uid, endpoint), None)

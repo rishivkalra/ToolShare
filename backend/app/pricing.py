@@ -17,11 +17,13 @@ def price_booking(
     days = rental_days(start, end)
     rental = price_per_day_cents * days
     fee = max(round(rental * settings.service_fee_pct), settings.service_fee_min_cents)
+    protection = settings.protection_fee_cents
     return PriceBreakdown(
         days=days,
         price_per_day_cents=price_per_day_cents,
         rental_cents=rental,
         service_fee_cents=fee,
-        total_cents=rental + fee,
+        protection_fee_cents=protection,
+        total_cents=rental + fee + protection,
         deposit_cents=deposit_cents,
     )

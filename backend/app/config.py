@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     service_fee_min_cents: int = 100
     min_price_per_day_cents: int = 500
 
+    # ToolShare Guarantee: flat protection line on every rental, funding
+    # damage/theft coverage up to the cap (self-underwritten at launch).
+    protection_fee_cents: int = 150
+    guarantee_cap_cents: int = 250_000
+
+    # Web Push (VAPID). Generated once by gcp_provision.py; empty disables
+    # push (in-app notifications still work).
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:support@toolshare.app"
+
     # Booking requests expire if the lender doesn't respond.
     request_expiry_hours: int = 24
     # Deposit holds are voided this long after a clean return.

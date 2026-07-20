@@ -37,13 +37,14 @@ def test_full_rental_happy_path(client, container, listing):
     assert booking["state"] == "requested"
     assert booking["price"]["rental_cents"] == 1600
     assert booking["price"]["service_fee_cents"] == 240
-    assert booking["price"]["total_cents"] == 1840
+    assert booking["price"]["protection_fee_cents"] == 150  # ToolShare Guarantee
+    assert booking["price"]["total_cents"] == 1990
 
     # Lender approves -> charge + deposit hold -> CONFIRMED.
     resp = client.post(f"/v1/bookings/{booking['id']}/approve", headers=auth("lender1"))
     assert resp.status_code == 200
     assert resp.json()["state"] == "confirmed"
-    assert container.payments.charges[0][1] == 1840
+    assert container.payments.charges[0][1] == 1990
     assert container.payments.deposits[0][1] == 5000
 
     # Address is now revealed to the borrower.

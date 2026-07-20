@@ -134,7 +134,7 @@ def main() -> None:
     step(
         "Approve charges rental+fee and holds deposit",
         b["state"] == "confirmed"
-        and b["price"]["total_cents"] == 1840  # 2 days x $8 + 15% fee
+        and b["price"]["total_cents"] == 1990  # 2 days x $8 + 15% fee + $1.50 protection
         and b["stripe_deposit_intent"] != "",
         f"charged ${b['price']['total_cents'] / 100:.2f}, deposit hold ${b['price']['deposit_cents'] / 100:.2f}",
     )

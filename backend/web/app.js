@@ -27,7 +27,11 @@ const store = {
   loc: { ...DEMO_LOC, usingDemo: true },
   profiles: {},   // uid -> public profile cache
   photoBlob: null, // pending listing photo
+  view: "list",   // browse presentation: list | map
+  lastResults: [], // cached search results shared by list + map
 };
+
+const PROTECTION_FEE_CENTS = 150;  // mirrors server; server-computed price is authoritative
 
 function authHeader() {
   return `Bearer ${store.token || "dev:" + store.uid}`;
@@ -157,18 +161,63 @@ async function loadBrowse() {
     const q = $("#search-input").value.trim();
     const params = new URLSearchParams({ lat: store.loc.lat, lng: store.loc.lng, radius_km: 8 });
     if (q) params.set("q", q);
-    const results = await api("GET", `/v1/listings/search?${params}`);
-    if (!results.length) {
-      grid.innerHTML = `<div class="empty"><span class="big">🌱</span>No tools here yet.<br>Be the first — list one from the <b>List</b> tab.</div>`;
-      return;
-    }
-    grid.innerHTML = results.map(toolCard).join("");
-    grid.querySelectorAll(".toolcard").forEach((el) => {
-      el.onclick = () => openListing(el.dataset.id);
-    });
+    store.lastResults = await api("GET", `/v1/listings/search?${params}`);
+    renderBrowse();
   } catch (e) {
     grid.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`;
   }
+}
+
+function renderBrowse() {
+  const grid = $("#browse-results");
+  const results = store.lastResults;
+  const mapMode = store.view === "map";
+  $("#view-list").classList.toggle("active", !mapMode);
+  $("#view-map").classList.toggle("active", mapMode);
+  $("#map").hidden = !mapMode;
+  grid.hidden = mapMode;
+  if (mapMode) { renderMap(results); return; }
+  if (!results.length) {
+    grid.innerHTML = `<div class="empty"><span class="big">🌱</span>No tools here yet.<br>Be the first — list one from the <b>List</b> tab.</div>`;
+    return;
+  }
+  grid.innerHTML = results.map(toolCard).join("");
+  grid.querySelectorAll(".toolcard").forEach((el) => {
+    el.onclick = () => openListing(el.dataset.id);
+  });
+}
+
+/* ---------------- map view (vendored Leaflet + OSM tiles) ---------------- */
+
+let map = null, mapMarkers = [];
+
+function renderMap(results) {
+  if (typeof L === "undefined") { toast("Map library failed to load", true); return; }
+  if (!map) {
+    map = L.map("map", { scrollWheelZoom: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+  }
+  map.setView([store.loc.lat, store.loc.lng], 14);
+  setTimeout(() => map.invalidateSize(), 60);  // container was just unhidden
+  mapMarkers.forEach((m) => m.remove());
+  mapMarkers = results.map((r) => {
+    const l = r.listing;
+    const icon = L.divIcon({
+      className: "",
+      html: `<div class="pricepin">${dollars(l.price_per_day_cents)} · ${esc(l.title.slice(0, 18))}${l.title.length > 18 ? "…" : ""}</div>`,
+      iconSize: [0, 0],
+    });
+    return L.marker([l.approx_lat, l.approx_lng], { icon })
+      .addTo(map)
+      .on("click", () => openListing(l.id));
+  });
+  // Approximate-location reminder ring around the searcher.
+  const me = L.circleMarker([store.loc.lat, store.loc.lng],
+    { radius: 7, color: "#0E7A46", fillColor: "#12925A", fillOpacity: 0.9 }).addTo(map);
+  mapMarkers.push(me);
 }
 
 function photoHtml(l, cls = "") {
@@ -196,19 +245,110 @@ function toolCard(r) {
 
 /* ---------------- listing modal & booking ---------------- */
 
+/* Availability calendar: shared by the booking modal (pick a free range) and
+   the owner blackout editor (toggle blocked days). */
+
+function calBlockedSet(avail) {
+  const blocked = new Set(avail.blackout_dates || []);
+  for (const r of avail.booked || []) {
+    for (let d = new Date(r.start_date + "T00:00Z"); ; d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      blocked.add(iso);
+      if (iso >= r.end_date) break;
+    }
+  }
+  return blocked;
+}
+
+function calHtml(ym, blocked, sel, opts = {}) {
+  const [y, m] = ym;
+  const today = new Date().toISOString().slice(0, 10);
+  const first = new Date(Date.UTC(y, m, 1));
+  const label = first.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  let cells = ["S", "M", "T", "W", "T", "F", "S"].map((d) => `<div class="dow">${d}</div>`).join("");
+  cells += `<div></div>`.repeat(first.getUTCDay());
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const past = iso <= today && !(opts.allowToday && iso === today);
+    const isBlocked = blocked.has(iso);
+    const cls = ["cal-day"];
+    if (past) cls.push("off");
+    else if (isBlocked) cls.push("blocked");
+    if (iso === today) cls.push("today");
+    if (sel.start && iso === sel.start) cls.push("sel");
+    if (sel.end && iso === sel.end) cls.push("sel");
+    if (sel.start && sel.end && iso > sel.start && iso < sel.end) cls.push("inrange");
+    cells += `<div class="${cls.join(" ")}" ${past ? "" : `data-day="${iso}"`}>${day}</div>`;
+  }
+  return `<div class="cal">
+    <div class="cal-head">
+      <button data-cal="prev">‹</button><b>${label}</b><button data-cal="next">›</button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+    <div class="cal-legend">
+      <span><i style="background:var(--green-grad)"></i>selected</span>
+      <span><i style="background:var(--wash);text-decoration:line-through">&nbsp;</i>unavailable</span>
+    </div>
+  </div>`;
+}
+
+function rangeIsFree(start, end, blocked) {
+  for (let d = new Date(start + "T00:00Z"); ; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (blocked.has(iso)) return false;
+    if (iso >= end) return true;
+  }
+}
+
 async function openListing(id) {
   const l = await api("GET", `/v1/listings/${id}`).catch((e) => (toast(e.message, true), null));
   if (!l) return;
-  const owner = await profileOf(l.owner_uid);
-  let days = 1;
+  const [owner, avail] = await Promise.all([
+    profileOf(l.owner_uid),
+    api("GET", `/v1/listings/${id}/availability`).catch(() => ({ booked: [], blackout_dates: [] })),
+  ]);
+  const blocked = calBlockedSet(avail);
+  const now = new Date();
+  let calYM = [now.getUTCFullYear(), now.getUTCMonth()];
+  // Preselect tomorrow when it's free, so one tap can already request.
+  const sel = { start: null, end: null };
+  if (!blocked.has(isoInDays(1))) { sel.start = isoInDays(1); sel.end = isoInDays(1); }
+
   const fee = (rental) => Math.max(Math.round(rental * 0.15), 100);
   const render = () => {
+    $("#m-cal").innerHTML = calHtml(calYM, blocked, sel);
+    bindCal();
+    const box = $("#m-total");
+    const btn = $("#m-request");
+    if (!sel.start) {
+      box.innerHTML = `<span class="opt">Pick your rental dates on the calendar.</span>`;
+      btn.disabled = true;
+      return;
+    }
+    const end = sel.end || sel.start;
+    const days = daysBetween(sel.start, end);
     const rental = l.price_per_day_cents * days;
-    $("#m-days").textContent = `${days} day${days > 1 ? "s" : ""} · starting tomorrow`;
-    $("#m-total").innerHTML =
-      `${dollars(rental)} rental + ${dollars(fee(rental))} service fee` +
+    box.innerHTML =
+      `<b>${esc(sel.start)} → ${esc(end)}</b> · ${days} day${days > 1 ? "s" : ""}<br>` +
+      `${dollars(rental)} rental + ${dollars(fee(rental))} service fee + ${dollars(PROTECTION_FEE_CENTS)} protection` +
       (l.deposit_cents ? `<br>+ ${dollars(l.deposit_cents)} refundable deposit hold (released on safe return)` : "") +
-      `<div class="grand">Total ${dollars(rental + fee(rental))}</div>`;
+      `<div class="grand">Total ${dollars(rental + fee(rental) + PROTECTION_FEE_CENTS)}</div>
+       <div class="protectline">🛡️ ToolShare Guarantee — covered up to $2,500 against damage or theft</div>`;
+    btn.disabled = false;
+  };
+  const bindCal = () => {
+    $("#m-cal [data-cal=prev]").onclick = () => { calYM = prevYM(calYM); render(); };
+    $("#m-cal [data-cal=next]").onclick = () => { calYM = nextYM(calYM); render(); };
+    document.querySelectorAll("#m-cal [data-day]:not(.blocked)").forEach((el) => {
+      el.onclick = () => {
+        const d = el.dataset.day;
+        if (!sel.start || sel.end) { sel.start = d; sel.end = null; }
+        else if (d >= sel.start && rangeIsFree(sel.start, d, blocked)) sel.end = d;
+        else { sel.start = d; sel.end = null; }
+        render();
+      };
+    });
   };
   modal(`
     <div class="mphoto">${photoHtml(l)}
@@ -220,11 +360,10 @@ async function openListing(id) {
         ${CATEGORIES[l.category] || "🧰"} ${esc(l.category.replace(/_/g, " "))} · condition: ${esc(l.condition)}
         ${l.rating_count ? ` · ★ ${l.rating_avg} (${l.rating_count})` : ""}</p>
       <p style="margin:6px 0 2px;font-size:14px">Owner: <b>${esc(owner.display_name || l.owner_uid)}</b>
+        ${owner.id_verified ? `<span class="chip ok">🪪 ID verified</span>` : ""}
         ${owner.rating_count ? `<span class="chip ok">★ ${owner.rating_avg}</span>` : `<span class="chip">new lender</span>`}</p>
       ${l.description ? `<p style="margin:10px 0">${esc(l.description)}</p>` : ""}
-      <div class="stepper">
-        <button id="m-minus">−</button><b id="m-days"></b><button id="m-plus">+</button>
-      </div>
+      <div id="m-cal"></div>
       <div class="totalbox" id="m-total"></div>
       <button class="btn btn-primary btn-big" id="m-request" style="width:100%">Request to rent</button>
       <p class="fineprint">You're only charged if the owner accepts. Exact pickup address is shared after confirmation.</p>
@@ -232,12 +371,11 @@ async function openListing(id) {
     </div>
   `);
   render();
-  $("#m-minus").onclick = () => { days = Math.max(1, days - 1); render(); };
-  $("#m-plus").onclick = () => { days = Math.min(7, days + 1); render(); };
   $("#m-report").onclick = () => reportTarget("listing", l.id);
   $("#m-request").onclick = async () => {
     try {
-      await api("POST", "/v1/bookings", { listing_id: l.id, start_date: isoInDays(1), end_date: isoInDays(days) });
+      await api("POST", "/v1/bookings",
+        { listing_id: l.id, start_date: sel.start, end_date: sel.end || sel.start });
       closeModal();
       toast("Requested! The owner has 24h to accept — track it in Rentals.");
       location.hash = "#/rentals";
@@ -247,6 +385,9 @@ async function openListing(id) {
     }
   };
 }
+
+const prevYM = ([y, m]) => (m === 0 ? [y - 1, 11] : [y, m - 1]);
+const nextYM = ([y, m]) => (m === 11 ? [y + 1, 0] : [y, m + 1]);
 
 function modal(html) {
   $("#modal-root").innerHTML = `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;
@@ -508,6 +649,21 @@ async function renderBookingDetail(id) {
   }
 }
 
+function refundMath(b, isLender) {
+  if (b.state === "requested") {
+    return "Cancel this request? No charge has been made.";
+  }
+  const paid = b.price.total_cents;
+  if (isLender) {
+    return `Cancel this booking? The borrower is refunded in full ` +
+      `(${dollars(paid)}) and their deposit hold is released. Frequent ` +
+      `owner cancellations hurt your profile.`;
+  }
+  const kept = b.price.service_fee_cents + b.price.protection_fee_cents;
+  return `Cancel this booking? You get the rental back (${dollars(b.price.rental_cents)}) ` +
+    `and the deposit hold is released. The ${dollars(kept)} in fees is not refunded.`;
+}
+
 async function bookingAction(id, action) {
   try {
     if (action === "send") {
@@ -523,7 +679,13 @@ async function bookingAction(id, action) {
       toast("Thanks for the review! ⭐");
       return;
     }
+    if (action === "cancel") {
+      // Show the exact refund consequences before anything happens.
+      const b = await api("GET", `/v1/bookings/${id}`);
+      if (!confirm(refundMath(b, b.lender_uid === store.uid))) return;
+    }
     await api("POST", `/v1/bookings/${id}/${action}`);
+    if (action === "cancel") toast("Cancelled — refunds per policy are on their way.");
     if (action === "approve") toast("Approved — borrower charged, deposit held. 💳");
     if (action === "return") toast("Rental complete — payout released to you. 🎉");
     loadRentals();
@@ -555,8 +717,41 @@ async function loadProfile() {
       p.rating_count > 0 ? `<span class="badge">⭐ Reviewed neighbor</span>` : "",
     ].join("") || `<span class="chip">New neighbor — add a card to start renting</span>`;
     renderCard(p, name);
+    renderLadder(p);
     loadMyTools();
   } catch (e) { toast(e.message, true); }
+}
+
+function renderLadder(p) {
+  const rung = (done, icon, label, sub, stateHtml) => `
+    <div class="rung ${done ? "done" : ""}">
+      <span class="ic">${icon}</span>
+      <div><div class="lbl">${label}</div><div class="sub">${sub}</div></div>
+      <span class="state">${stateHtml}</span>
+    </div>`;
+  $("#ladder").innerHTML =
+    rung(true, "🙂", "Neighbor account", "Google or invited sign-in", "✓") +
+    rung(p.card_on_file, "💳", "Card on file", "Backs every deposit hold",
+      p.card_on_file ? "✓ verified" : "add below") +
+    rung(p.id_verified, "🪪", "Government ID", "Stripe Identity document check",
+      p.id_verified ? "✓ verified"
+        : `<button class="btn" id="verify-id-btn" style="padding:5px 12px">Verify my ID</button>`) +
+    rung(p.rating_count > 0, "⭐", "Reviewed neighbor", "Earn reviews by completing rentals",
+      p.rating_count > 0 ? `✓ ${p.rating_count} review${p.rating_count > 1 ? "s" : ""}` : "not yet");
+  const btn = $("#verify-id-btn");
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const r = await api("POST", "/v1/users/me/identity-session");
+      if (r.id_verified) {
+        toast("You're ID-verified 🪪 — trust badge unlocked!");
+        loadProfile();
+      } else if (r.verification_url) {
+        window.open(r.verification_url, "_blank");
+        toast("Complete the ID check in the new tab — your badge appears automatically.");
+      }
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  };
 }
 
 function renderCard(p, name) {
@@ -601,12 +796,13 @@ async function loadMyTools() {
       const active = h && h.active_borrower
         ? `<span class="chip warn">with ${esc(h.active_borrower)} until ${esc(h.active_until)}</span>`
         : `<span class="chip ok">available</span>`;
-      const rows = h && h.entries.length
+      const rows = (h && h.entries.length
         ? `<table><tr><th>Renter</th><th>Dates</th><th>Days</th><th>Earned</th></tr>` +
           h.entries.map((e) =>
             `<tr><td>${esc(e.borrower_name)}</td><td>${esc(e.start_date)} → ${esc(e.end_date)}</td>` +
             `<td>${e.days}</td><td>${dollars(e.earned_cents)}</td></tr>`).join("") + `</table>`
-        : `<p class="opt" style="margin-top:8px">No rentals yet for this tool.</p>`;
+        : `<p class="opt" style="margin-top:8px">No rentals yet for this tool.</p>`)
+        + `<button class="btn" style="margin-top:10px" data-blackout="${esc(t.id)}">📅 Block dates</button>`;
       return `<div class="mytool" data-i="${i}">
         <div class="row1"><span>${CATEGORIES[t.category] || "🧰"}</span><span class="t">${esc(t.title)}</span>${active}</div>
         <div class="sub">${dollars(t.price_per_day_cents)}/day · rented ${h ? h.times_rented : 0}× · ${h ? h.total_days_rented : 0} days total · earned ${dollars(h ? h.total_earned_cents : 0)}</div>
@@ -614,14 +810,65 @@ async function loadMyTools() {
       </div>`;
     }).join("");
     listEl.querySelectorAll(".mytool").forEach((el) => {
-      el.onclick = () => {
+      el.onclick = (ev) => {
+        if (ev.target.closest("[data-blackout]")) return;
         const hist = el.querySelector(".hist");
         hist.style.display = hist.style.display === "none" ? "block" : "none";
       };
     });
+    listEl.querySelectorAll("[data-blackout]").forEach((btn) => {
+      btn.onclick = () => openBlackoutEditor(tools.find((t) => t.id === btn.dataset.blackout));
+    });
   } catch (e) {
     listEl.innerHTML = `<p class="opt">⚠️ ${esc(e.message)}</p>`;
   }
+}
+
+async function openBlackoutEditor(tool) {
+  if (!tool) return;
+  const avail = await api("GET", `/v1/listings/${tool.id}/availability`)
+    .catch(() => ({ booked: [], blackout_dates: [] }));
+  const bookedOnly = calBlockedSet({ booked: avail.booked, blackout_dates: [] });
+  const chosen = new Set(avail.blackout_dates);
+  const now = new Date();
+  let calYM = [now.getUTCFullYear(), now.getUTCMonth()];
+  const render = () => {
+    // Booked days are locked (can't blackout a confirmed rental); chosen
+    // blackouts render as selected.
+    $("#bo-cal").innerHTML = calHtml(calYM, bookedOnly,
+      { start: null, end: null }, { allowToday: true });
+    document.querySelectorAll("#bo-cal [data-day]").forEach((el) => {
+      if (chosen.has(el.dataset.day)) el.classList.add("sel");
+      el.onclick = () => {
+        const d = el.dataset.day;
+        chosen.has(d) ? chosen.delete(d) : chosen.add(d);
+        render();
+      };
+    });
+    $("#bo-cal [data-cal=prev]").onclick = () => { calYM = prevYM(calYM); render(); };
+    $("#bo-cal [data-cal=next]").onclick = () => { calYM = nextYM(calYM); render(); };
+    $("#bo-count").textContent = chosen.size
+      ? `${chosen.size} day${chosen.size > 1 ? "s" : ""} blocked`
+      : "No blocked days — tap days to block them";
+  };
+  modal(`
+    <div class="inner">
+      <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+      <h2>📅 Block dates</h2>
+      <p style="color:var(--muted);margin:6px 0 2px">${esc(tool.title)} — tap days you don't want it rented (your own projects, trips…). Days with confirmed rentals are locked.</p>
+      <div id="bo-cal"></div>
+      <p class="opt" id="bo-count"></p>
+      <button class="btn btn-primary btn-big" id="bo-save" style="width:100%">Save blocked dates</button>
+    </div>
+  `);
+  render();
+  $("#bo-save").onclick = async () => {
+    try {
+      await api("PATCH", `/v1/listings/${tool.id}`, { blackout_dates: [...chosen].sort() });
+      closeModal();
+      toast("Blocked dates saved — the calendar shows them as unavailable ✓");
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 async function saveProfile() {
@@ -664,6 +911,88 @@ function switchUser() {
   loadProfile();
 }
 
+/* ---------------- notifications (bell + web push) ---------------- */
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+async function loadNotifs() {
+  try {
+    const feed = await api("GET", "/v1/notifications");
+    store.notifFeed = feed;
+    const badge = $("#bell-badge");
+    badge.hidden = feed.unread === 0;
+    badge.textContent = feed.unread > 9 ? "9+" : feed.unread;
+  } catch { /* not signed in yet — ignore */ }
+}
+
+async function toggleNotifPanel() {
+  const panel = $("#notif-panel");
+  if (!panel.hidden) { panel.hidden = true; return; }
+  await loadNotifs();
+  const feed = store.notifFeed || { items: [], unread: 0 };
+  $("#notif-list").innerHTML = feed.items.length
+    ? feed.items.map((n) => `
+        <div class="notif ${n.read ? "" : "unread"}" data-booking="${esc(n.booking_id)}">
+          <div class="t">${esc(n.title)}</div>
+          ${n.body ? `<div class="b">${esc(n.body)}</div>` : ""}
+          <div class="when">${timeAgo(n.created_at)}</div>
+        </div>`).join("")
+    : `<p class="opt" style="padding:14px 6px">Nothing yet — booking activity shows up here.</p>`;
+  panel.hidden = false;
+  $("#notif-list").querySelectorAll(".notif").forEach((el) => {
+    el.onclick = () => {
+      panel.hidden = true;
+      if (el.dataset.booking) { openBooking = el.dataset.booking; location.hash = "#/rentals"; loadRentals(); }
+    };
+  });
+  setupPushButton();
+  if (feed.unread > 0) {
+    await api("POST", "/v1/notifications/read").catch(() => {});
+    $("#bell-badge").hidden = true;
+  }
+}
+
+async function setupPushButton() {
+  const btn = $("#push-btn");
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  if (!supported || Notification.permission === "granted") { btn.hidden = true; return; }
+  let cfg = { vapid_public_key: "" };
+  try { cfg = await api("GET", "/v1/notifications/config"); } catch { /* ignore */ }
+  if (!cfg.vapid_public_key) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.onclick = () => enablePush(cfg.vapid_public_key);
+}
+
+function b64ToUint8(base64) {
+  const pad = "=".repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob((base64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((ch) => ch.charCodeAt(0)));
+}
+
+async function enablePush(vapidKey) {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { toast("Push permission declined", true); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: b64ToUint8(vapidKey),
+    });
+    const j = sub.toJSON();
+    await api("POST", "/v1/notifications/subscriptions",
+      { endpoint: sub.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth });
+    $("#push-btn").hidden = true;
+    toast("Push enabled — you'll hear about requests instantly 🔔");
+  } catch (e) { toast("Couldn't enable push: " + e.message, true); }
+}
+
 /* ---------------- boot ---------------- */
 
 function boot() {
@@ -693,9 +1022,20 @@ function boot() {
       loadProfile();
     } catch (e) { toast(e.message, true); }
   };
+  $("#view-list").onclick = () => { store.view = "list"; renderBrowse(); };
+  $("#view-map").onclick = () => { store.view = "map"; renderBrowse(); };
+  $("#bell").onclick = toggleNotifPanel;
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest("#notif-panel, #bell")) $("#notif-panel").hidden = true;
+  });
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/app/sw.js").catch(() => {});
+  }
   $("#whoami-name").textContent = store.uid;
   $("#whoami-dot").textContent = initial(store.uid);
   renderLocRow();
   route();
+  loadNotifs();
+  setInterval(loadNotifs, 45000);
 }
 boot();

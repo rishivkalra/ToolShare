@@ -26,7 +26,7 @@ def send_message(
     uid: str = Depends(current_uid),
     c: Container = Depends(get_container),
 ):
-    _require_participant(booking_id, uid, c)
+    booking = _require_participant(booking_id, uid, c)
     msg = Message(
         id=next_id("msg"),
         booking_id=booking_id,
@@ -34,7 +34,19 @@ def send_message(
         text=body.text,
         created_at=datetime.now(timezone.utc),
     )
-    return c.messages.create(msg)
+    c.messages.create(msg)
+    other = booking.lender_uid if uid == booking.borrower_uid else booking.borrower_uid
+    sender = c.users.get(uid)
+    sender_name = (sender.display_name if sender and sender.display_name else uid)
+    preview = body.text if len(body.text) <= 80 else body.text[:77] + "…"
+    c.notifier.notify(
+        other,
+        f"💬 {sender_name} · {booking.listing_title}",
+        preview,
+        booking_id=booking_id,
+        kind="message",
+    )
+    return msg
 
 
 @router.get("", response_model=list[Message])

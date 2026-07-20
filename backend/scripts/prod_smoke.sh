@@ -28,8 +28,8 @@ curl -sfS -X POST "$URL/v1/users/me/payment-method" -H "$B" \
 echo "== booking request (state machine + Cloud Tasks expiry scheduling)"
 BID=$(curl -sfS -X POST "$URL/v1/bookings" -H "$B" -H "$H" \
   -d "{\"listing_id\":\"$LID\",\"start_date\":\"2026-08-01\",\"end_date\":\"2026-08-02\"}" \
-  | python3 -c 'import sys,json;b=json.load(sys.stdin);print(b["id"]);assert b["state"]=="requested";assert b["price"]["total_cents"]==1840')
-echo "booking: $BID (requested, \$18.40)"
+  | python3 -c 'import sys,json;b=json.load(sys.stdin);print(b["id"]);assert b["state"]=="requested";assert b["price"]["total_cents"]==1990')
+echo "booking: $BID (requested, \$19.90)"
 
 echo "== lender approves (staging FakePayments)"
 curl -sfS -X POST "$URL/v1/bookings/$BID/approve" -H "$L" \

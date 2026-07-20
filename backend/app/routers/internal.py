@@ -38,4 +38,10 @@ def expire_booking(body: BookingTask, c: Container = Depends(get_container)):
         return {"expired": False}  # already handled — idempotent no-op
     transition(booking, BookingState.EXPIRED, "system", "lender did not respond")
     c.bookings.update(booking)
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Request expired — {booking.listing_title}",
+        "The owner didn't respond in 24h. No charge was made.",
+        booking_id=booking.id,
+    )
     return {"expired": True}

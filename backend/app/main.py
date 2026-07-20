@@ -11,10 +11,12 @@ from .routers import (
     internal,
     listings,
     messages,
+    notifications,
     projects,
     reports,
     reviews,
     users,
+    webhooks,
 )
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -35,6 +37,8 @@ app.include_router(reviews.router)
 app.include_router(projects.router)
 app.include_router(internal.router)
 app.include_router(reports.router)
+app.include_router(notifications.router)
+app.include_router(webhooks.router)
 app.include_router(listings.photos_router)
 
 

@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
 </head>
@@ -29,10 +30,21 @@
     <a href="#/rentals" data-tab="rentals">Rentals</a>
     <a href="#/profile" data-tab="profile">Profile</a>
   </nav>
+  <button class="bellbtn" id="bell" title="Notifications" aria-label="Notifications">
+    🔔<span class="bellbadge" id="bell-badge" hidden></span>
+  </button>
   <button class="whoami" id="whoami" title="Your profile">
     <span class="dot" id="whoami-dot">?</span><span id="whoami-name">…</span>
   </button>
 </header>
+
+<div class="notifpanel" id="notif-panel" hidden>
+  <div class="np-head">
+    <b>Notifications</b>
+    <button class="btn" id="push-btn" hidden>🔔 Enable push</button>
+  </div>
+  <div id="notif-list"></div>
+</div>
 
 <main id="main">
 
@@ -46,7 +58,12 @@
         <button class="btn btn-primary" id="search-btn">Search</button>
       </div>
       <div class="locrow" id="locrow"></div>
+      <div class="viewtoggle" role="tablist">
+        <button id="view-list" class="active">☰ List</button>
+        <button id="view-map">🗺️ Map</button>
+      </div>
     </div>
+    <div id="map" hidden></div>
     <div id="browse-results" class="cardgrid"></div>
   </section>
 
@@ -145,6 +162,12 @@
       </div>
 
       <div class="panel" style="margin-bottom:0">
+        <div class="section-title" style="margin-top:0">🪪 Trust ladder</div>
+        <p class="opt" style="margin-bottom:8px">Each rung unlocks more — ID-verified neighbors get faster approvals and instant-book eligibility.</p>
+        <div id="ladder"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:0">
         <div class="section-title" style="margin-top:0">💳 Payment method</div>
         <p class="opt" style="margin-bottom:4px">Required before renting — it backs the refundable deposit hold that protects tool owners.</p>
         <div id="cc-visual"></div>
@@ -164,6 +187,7 @@
       <div class="panel">
         <div class="section-title" style="margin-top:0">🛡️ How ToolShare keeps both sides safe</div>
         <ul class="safety">
+          <li><b>ToolShare Guarantee:</b> every rental includes protection up to $2,500 against damage or theft (the $1.50 protection line on each rental)</li>
           <li>Card on file required before any rental request</li>
           <li>Refundable deposit hold — captured only if damage is reported</li>
           <li>Exact addresses hidden until a booking is paid and confirmed</li>
@@ -190,6 +214,7 @@
 <div id="modal-root"></div>
 <div id="toast-root"></div>
 
+<script src="vendor/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -7,7 +7,16 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from ..models import Booking, Listing, Message, Report, Review, UserProfile
+from ..models import (
+    Booking,
+    Listing,
+    Message,
+    Notification,
+    PushSubscription,
+    Report,
+    Review,
+    UserProfile,
+)
 
 
 class UserRepo(Protocol):
@@ -47,3 +56,15 @@ class ReviewRepo(Protocol):
 
 class ReportRepo(Protocol):
     def create(self, report: Report) -> Report: ...
+
+
+class NotificationRepo(Protocol):
+    def create(self, notification: Notification) -> Notification: ...
+    def for_user(self, uid: str, limit: int = 50) -> list[Notification]: ...
+    def mark_all_read(self, uid: str) -> int: ...
+
+
+class PushSubRepo(Protocol):
+    def upsert(self, sub: PushSubscription) -> None: ...
+    def for_user(self, uid: str) -> list[PushSubscription]: ...
+    def remove(self, uid: str, endpoint: str) -> None: ...

@@ -8,11 +8,15 @@ from .repos.base import (
     BookingRepo,
     ListingRepo,
     MessageRepo,
+    NotificationRepo,
+    PushSubRepo,
     ReportRepo,
     ReviewRepo,
     UserRepo,
 )
 from .services.google_auth import GoogleVerifier, build_verifier
+from .services.identity import FakeIdentity, IdentityProvider, StripeIdentity
+from .services.notify import Notifier
 from .services.payments import FakePayments, PaymentProvider
 from .services.photos import GcsPhotoStore, MemoryPhotoStore, PhotoStore
 from .services.project_planner import ProjectPlanner, build_planner
@@ -32,6 +36,10 @@ class Container:
     tasks: TaskScheduler
     photos: PhotoStore
     google_auth: GoogleVerifier | None
+    notifications: NotificationRepo
+    push_subs: PushSubRepo
+    notifier: Notifier
+    identity: IdentityProvider
 
 
 _container: Container | None = None
@@ -45,6 +53,8 @@ def build_container(settings: Settings) -> Container:
             FirestoreBookingRepo,
             FirestoreListingRepo,
             FirestoreMessageRepo,
+            FirestoreNotificationRepo,
+            FirestorePushSubRepo,
             FirestoreReportRepo,
             FirestoreReviewRepo,
             FirestoreUserRepo,
@@ -87,12 +97,20 @@ def build_container(settings: Settings) -> Container:
             photos=GcsPhotoStore(settings.photos_bucket)
             if settings.photos_bucket else MemoryPhotoStore(),
             google_auth=build_verifier(settings.env, settings.google_client_id),
+            notifications=(notif_repo := FirestoreNotificationRepo(db)),
+            push_subs=(subs_repo := FirestorePushSubRepo(db)),
+            notifier=Notifier(notif_repo, subs_repo,
+                              settings.vapid_private_key, settings.vapid_subject),
+            identity=StripeIdentity(settings.stripe_secret_key, settings.service_base_url)
+            if settings.stripe_secret_key else FakeIdentity(),
         )
 
     from .repos.memory import (
         MemoryBookingRepo,
         MemoryListingRepo,
         MemoryMessageRepo,
+        MemoryNotificationRepo,
+        MemoryPushSubRepo,
         MemoryReportRepo,
         MemoryReviewRepo,
         MemoryUserRepo,
@@ -112,6 +130,11 @@ def build_container(settings: Settings) -> Container:
         tasks=FakeScheduler(),
         photos=MemoryPhotoStore(),
         google_auth=build_verifier(settings.env, settings.google_client_id),
+        notifications=(notif_repo := MemoryNotificationRepo()),
+        push_subs=(subs_repo := MemoryPushSubRepo()),
+        notifier=Notifier(notif_repo, subs_repo,
+                          settings.vapid_private_key, settings.vapid_subject),
+        identity=FakeIdentity(),
     )
 
 

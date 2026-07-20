@@ -66,6 +66,7 @@ class UserProfile(BaseModel):
     # anchor and deposit-hold guarantee that keeps both sides safe.
     card_on_file: bool = False
     card_last4: str = ""
+    id_verified: bool = False  # government-ID check (Stripe Identity in prod)
     rating_avg: float = 0.0
     rating_count: int = 0
     created_at: Optional[datetime] = None
@@ -107,6 +108,7 @@ class ListingUpdate(BaseModel):
     price_per_day_cents: Optional[int] = Field(default=None, ge=500, le=50_000)
     deposit_cents: Optional[int] = Field(default=None, ge=0, le=200_000)
     status: Optional[ListingStatus] = None
+    blackout_dates: Optional[list[date]] = Field(default=None, max_length=180)
 
 
 class Listing(BaseModel):
@@ -125,6 +127,9 @@ class Listing(BaseModel):
     approx_lat: float = 0.0
     approx_lng: float = 0.0
     status: ListingStatus = ListingStatus.ACTIVE
+    # Days the owner has blocked out (vacations, own use); bookings can't
+    # overlap these and the calendar shows them as unavailable.
+    blackout_dates: list[date] = Field(default_factory=list)
     rating_avg: float = 0.0
     rating_count: int = 0
     created_at: Optional[datetime] = None
@@ -144,6 +149,9 @@ class PriceBreakdown(BaseModel):
     price_per_day_cents: int
     rental_cents: int
     service_fee_cents: int
+    # ToolShare Guarantee: flat per-rental protection line funding coverage
+    # up to the guarantee cap (see Settings.guarantee_cap_cents).
+    protection_fee_cents: int = 0
     total_cents: int
     deposit_cents: int
     currency: str = "usd"
@@ -220,6 +228,26 @@ class Report(BaseModel):
     target_id: str
     reason: str
     created_at: Optional[datetime] = None
+
+
+class Notification(BaseModel):
+    id: str
+    uid: str  # recipient
+    kind: str = "booking"  # booking | message | payout | system
+    title: str
+    body: str = ""
+    booking_id: str = ""
+    read: bool = False
+    created_at: Optional[datetime] = None
+
+
+class PushSubscription(BaseModel):
+    """A browser Web Push subscription (endpoint + client keys)."""
+
+    uid: str
+    endpoint: str
+    p256dh: str
+    auth: str
 
 
 class ReviewCreate(BaseModel):

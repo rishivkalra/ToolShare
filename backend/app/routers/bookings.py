@@ -67,6 +67,8 @@ def create_booking_request(
         )
     if c.bookings.overlapping(body.listing_id, body.start_date, body.end_date):
         raise HTTPException(status_code=409, detail="Those dates are already booked")
+    if any(body.start_date <= d <= body.end_date for d in listing.blackout_dates):
+        raise HTTPException(status_code=409, detail="The owner has blocked some of those dates")
 
     booking = Booking(
         id=next_id("bkg"),
@@ -99,6 +101,14 @@ def create_booking_request(
         "/internal/tasks/expire-booking",
         {"booking_id": booking.id},
         settings.request_expiry_hours * 3600,
+    )
+    borrower_name = borrower.display_name or uid
+    c.notifier.notify(
+        booking.lender_uid,
+        f"{borrower_name} wants to rent your {listing.title}",
+        f"{booking.start_date} → {booking.end_date} · "
+        f"you'd earn ${booking.price.rental_cents / 100:.2f}. Respond within 24h.",
+        booking_id=booking.id,
     )
     return booking
 
@@ -165,6 +175,14 @@ def approve(
         booking.stripe_deposit_intent = deposit.id
 
     _transition_or_409(booking, BookingState.CONFIRMED, "system", "payment captured")
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Confirmed! {booking.listing_title} is yours "
+        f"{booking.start_date} → {booking.end_date}",
+        "You've been charged; the deposit is a hold, not a charge. "
+        "Arrange pickup in chat.",
+        booking_id=booking.id,
+    )
     return c.bookings.update(booking)
 
 
@@ -176,6 +194,12 @@ def decline(
 ):
     booking = _get_booking_for(booking_id, uid, c)
     _transition_or_409(booking, BookingState.DECLINED, uid)
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Request declined — {booking.listing_title}",
+        "No charge was made. Similar tools may be available nearby.",
+        booking_id=booking.id,
+    )
     return c.bookings.update(booking)
 
 
@@ -205,6 +229,15 @@ def cancel(
             )
     if was_paid and booking.stripe_deposit_intent:
         c.payments.void_deposit(booking.stripe_deposit_intent)
+    other = (
+        booking.lender_uid if uid == booking.borrower_uid else booking.borrower_uid
+    )
+    c.notifier.notify(
+        other,
+        f"Booking cancelled — {booking.listing_title}",
+        "Any payment was refunded per the cancellation policy.",
+        booking_id=booking.id,
+    )
     return c.bookings.update(booking)
 
 
@@ -224,6 +257,23 @@ def confirm_pickup(
         booking.lender_marked_pickup = True
     if booking.borrower_marked_pickup and booking.lender_marked_pickup:
         _transition_or_409(booking, BookingState.PICKED_UP, booking.lender_uid, "both confirmed")
+        for party in (booking.borrower_uid, booking.lender_uid):
+            c.notifier.notify(
+                party,
+                f"Handoff confirmed — {booking.listing_title}",
+                f"Rental runs until {booking.end_date}. Day counter is live.",
+                booking_id=booking.id,
+            )
+    else:
+        other = (
+            booking.lender_uid if uid == booking.borrower_uid else booking.borrower_uid
+        )
+        c.notifier.notify(
+            other,
+            f"Your neighbor confirmed the handoff — {booking.listing_title}",
+            "Tap confirm on your side to start the rental.",
+            booking_id=booking.id,
+        )
     return c.bookings.update(booking)
 
 
@@ -249,6 +299,19 @@ def confirm_return(
         c.payments.void_deposit(booking.stripe_deposit_intent)
 
     _transition_or_409(booking, BookingState.COMPLETED, "system", "payout released")
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Rental complete — {booking.listing_title}",
+        "Deposit hold released. Leave your neighbor a review ⭐",
+        booking_id=booking.id,
+    )
+    c.notifier.notify(
+        booking.lender_uid,
+        f"You earned ${booking.price.rental_cents / 100:.2f} 🎉",
+        f"{booking.listing_title} came home safe. Payout is on its way.",
+        booking_id=booking.id,
+        kind="payout",
+    )
     return c.bookings.update(booking)
 
 
@@ -282,4 +345,11 @@ def dispute(
         amount = min(amount, booking.price.deposit_cents)
         if amount > 0:
             c.payments.capture_deposit(booking.stripe_deposit_intent, amount)
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Damage reported — {booking.listing_title}",
+        "The owner opened a dispute; the deposit hold is retained while "
+        "ToolShare reviews it. You're covered by the ToolShare Guarantee process.",
+        booking_id=booking.id,
+    )
     return c.bookings.update(booking)

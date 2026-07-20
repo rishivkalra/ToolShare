@@ -17,7 +17,17 @@ from typing import Optional
 
 from google.cloud import firestore
 
-from ..models import Booking, BookingState, Listing, Message, Report, Review, UserProfile
+from ..models import (
+    Booking,
+    BookingState,
+    Listing,
+    Message,
+    Notification,
+    PushSubscription,
+    Report,
+    Review,
+    UserProfile,
+)
 
 
 def _doc_to(model_cls, doc):
@@ -176,3 +186,49 @@ class FirestoreReportRepo:
     def create(self, report: Report) -> Report:
         self.col.document(report.id).set(report.model_dump(exclude={"id"}, mode="json"))
         return report
+
+
+class FirestoreNotificationRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("notifications")
+
+    def create(self, notification: Notification) -> Notification:
+        self.col.document(notification.id).set(
+            notification.model_dump(exclude={"id"}, mode="json")
+        )
+        return notification
+
+    def for_user(self, uid: str, limit: int = 50) -> list[Notification]:
+        # Equality-only filter (no composite index needed); sort client-side.
+        docs = self.col.where("uid", "==", uid).limit(200).stream()
+        items = [_doc_to(Notification, d) for d in docs]
+        items.sort(key=lambda n: n.created_at.isoformat() if n.created_at else "", reverse=True)
+        return items[:limit]
+
+    def mark_all_read(self, uid: str) -> int:
+        count = 0
+        for d in self.col.where("uid", "==", uid).where("read", "==", False).stream():
+            d.reference.update({"read": True})
+            count += 1
+        return count
+
+
+class FirestorePushSubRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("push_subs")
+
+    @staticmethod
+    def _key(uid: str, endpoint: str) -> str:
+        import hashlib
+
+        return f"{uid}_{hashlib.sha1(endpoint.encode()).hexdigest()[:16]}"
+
+    def upsert(self, sub: PushSubscription) -> None:
+        self.col.document(self._key(sub.uid, sub.endpoint)).set(sub.model_dump(mode="json"))
+
+    def for_user(self, uid: str) -> list[PushSubscription]:
+        docs = self.col.where("uid", "==", uid).stream()
+        return [PushSubscription.model_validate(d.to_dict()) for d in docs]
+
+    def remove(self, uid: str, endpoint: str) -> None:
+        self.col.document(self._key(uid, endpoint)).delete()

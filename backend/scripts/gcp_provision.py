@@ -253,10 +253,31 @@ def cloud_build(project_id: str, bucket: str, blob: str) -> str:
     raise TimeoutError("cloud build")
 
 
+def ensure_vapid() -> None:
+    """One-time VAPID keypair for Web Push — no third-party account needed."""
+    if "vapid_private" in state:
+        return
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    priv = key.private_numbers().private_value.to_bytes(32, "big")
+    pub = key.public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    b64u = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()  # noqa: E731
+    state["vapid_private"] = b64u(priv)
+    state["vapid_public"] = b64u(pub)
+    save_state()
+
+
 def run_env(project_id: str, base_url: str) -> list[dict]:
     if "internal_secret" not in state:
         state["internal_secret"] = pysecrets.token_hex(32)
         save_state()
+    ensure_vapid()
     env = {
         "TOOLSHARE_ENV": "prod",
         "TOOLSHARE_GCP_PROJECT": project_id,
@@ -267,6 +288,8 @@ def run_env(project_id: str, base_url: str) -> list[dict]:
         "TOOLSHARE_PLANNER": "gemini",  # Vertex AI via service identity, no key
         "TOOLSHARE_PHOTOS_BUCKET": f"{project_id}-photos",
         "TOOLSHARE_SERVICE_BASE_URL": base_url,
+        "TOOLSHARE_VAPID_PUBLIC_KEY": state["vapid_public"],
+        "TOOLSHARE_VAPID_PRIVATE_KEY": state["vapid_private"],
     }
     # Set once via: gcp_provision.py --google-client-id <id>.apps.googleusercontent.com
     # (creating the OAuth Web client itself is a one-time Cloud Console step).

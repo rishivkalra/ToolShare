@@ -106,6 +106,32 @@ def confirm_payment_method(
     return PaymentMethodStatus(card_on_file=user.card_on_file, card_last4=user.card_last4)
 
 
+class IdentitySessionResponse(BaseModel):
+    verification_url: str  # "" when verified instantly (staging)
+    id_verified: bool
+
+
+@router.post("/me/identity-session", response_model=IdentitySessionResponse)
+def start_identity_verification(
+    uid: str = Depends(current_uid), c: Container = Depends(get_container)
+):
+    """Top rung of the trust ladder: government-ID verification.
+
+    Prod sends the user to Stripe Identity's hosted flow (the webhook flips
+    the badge); staging verifies instantly so the ladder is fully testable.
+    """
+    user = c.users.get(uid) or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    if user.id_verified:
+        return IdentitySessionResponse(verification_url="", id_verified=True)
+    session = c.identity.start(uid)
+    if session.verified_now:
+        user.id_verified = True
+        c.users.upsert(user)
+    return IdentitySessionResponse(
+        verification_url=session.url, id_verified=user.id_verified
+    )
+
+
 class PayoutSweepResponse(BaseModel):
     paid_bookings: list[str]
     total_cents: int

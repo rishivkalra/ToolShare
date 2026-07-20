@@ -118,6 +118,41 @@ async def upload_photo(
     return c.listings.update(listing)
 
 
+class BookedRange(BaseModel):
+    start_date: date
+    end_date: date
+
+
+class Availability(BaseModel):
+    listing_id: str
+    booked: list[BookedRange]
+    blackout_dates: list[date]
+
+
+_BLOCKING_STATES = {BookingState.APPROVED, BookingState.CONFIRMED, BookingState.PICKED_UP}
+
+
+@router.get("/{listing_id}/availability", response_model=Availability)
+def availability(listing_id: str, c: Container = Depends(get_container)):
+    """Public calendar data: booked ranges + owner blackout days (no borrower
+    identities are exposed)."""
+    listing = c.listings.get(listing_id)
+    if not listing or listing.status == ListingStatus.REMOVED:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    today = datetime.now(timezone.utc).date()
+    booked = [
+        BookedRange(start_date=b.start_date, end_date=b.end_date)
+        for b in c.bookings.by_listing(listing_id)
+        if b.state in _BLOCKING_STATES and b.end_date >= today
+    ]
+    booked.sort(key=lambda r: r.start_date)
+    return Availability(
+        listing_id=listing_id,
+        booked=booked,
+        blackout_dates=sorted(d for d in listing.blackout_dates if d >= today),
+    )
+
+
 class RentalHistoryEntry(BaseModel):
     booking_id: str
     borrower_uid: str
