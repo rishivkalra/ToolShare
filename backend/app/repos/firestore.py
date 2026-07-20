@@ -17,7 +17,7 @@ from typing import Optional
 
 from google.cloud import firestore
 
-from ..models import Booking, BookingState, Listing, Message, Review, UserProfile
+from ..models import Booking, BookingState, Listing, Message, Report, Review, UserProfile
 
 
 def _doc_to(model_cls, doc):
@@ -104,6 +104,10 @@ class FirestoreBookingRepo:
             out.extend(_doc_to(Booking, d) for d in docs)
         return out
 
+    def by_listing(self, listing_id: str) -> list[Booking]:
+        docs = self.col.where("listing_id", "==", listing_id).stream()
+        return [_doc_to(Booking, d) for d in docs]
+
     def overlapping(self, listing_id: str, start: date, end: date) -> list[Booking]:
         blocking = [
             BookingState.APPROVED.value,
@@ -163,3 +167,12 @@ class FirestoreReviewRepo:
         for d in docs:
             return _doc_to(Review, d)
         return None
+
+
+class FirestoreReportRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("reports")
+
+    def create(self, report: Report) -> Report:
+        self.col.document(report.id).set(report.model_dump(exclude={"id"}, mode="json"))
+        return report

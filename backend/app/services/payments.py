@@ -35,6 +35,9 @@ class SetupIntentBundle:
 class PaymentProvider(Protocol):
     def ensure_customer(self, uid: str, existing_customer_id: str) -> str: ...
     def create_setup_intent(self, customer_id: str) -> SetupIntentBundle: ...
+    def card_last4(self, customer_id: str) -> Optional[str]:
+        """Last4 of the customer's saved card, or None if no card on file."""
+        ...
     def charge_rental(
         self, customer_id: str, amount_cents: int, booking_id: str
     ) -> PaymentResult: ...
@@ -75,6 +78,9 @@ class FakePayments:
             setup_intent_client_secret=f"seti_fake_{n}_secret",
             ephemeral_key_secret=f"ek_fake_{n}",
         )
+
+    def card_last4(self, customer_id: str) -> Optional[str]:
+        return "4242"  # staging: every customer "has" a saved test card
 
     def charge_rental(self, customer_id, amount_cents, booking_id) -> PaymentResult:
         if self.fail_next_charge:
@@ -137,6 +143,10 @@ class StripePayments:
     def _default_pm(self, customer_id: str) -> Optional[str]:
         pms = self.stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)
         return pms.data[0].id if pms.data else None
+
+    def card_last4(self, customer_id: str) -> Optional[str]:
+        pms = self.stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)
+        return pms.data[0].card.last4 if pms.data else None
 
     def charge_rental(self, customer_id, amount_cents, booking_id) -> PaymentResult:
         pm = self._default_pm(customer_id)

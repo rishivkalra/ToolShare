@@ -1,5 +1,5 @@
 """Kit checkout, request expiry, payment setup, and payout sweep."""
-from .conftest import auth
+from .conftest import add_card, auth
 
 
 def _seed(client, title, price=800, owner="lender1"):
@@ -23,6 +23,7 @@ def _seed(client, title, price=800, owner="lender1"):
 # ---------------------------------------------------------------------------
 
 def test_kit_checkout_requests_all_tools(client, container):
+    add_card(client, "borrower1")
     saw = _seed(client, "Circular saw", 800, "lender1")
     drill = _seed(client, "Cordless drill", 600, "lender2")
 
@@ -49,6 +50,7 @@ def test_kit_checkout_partial_failure(client, listing, confirmed_booking):
     # `listing` already has a confirmed booking for Aug 1-2; a kit containing
     # it plus a free tool should succeed partially.
     free = _seed(client, "Palm sander", 500, "lender2")
+    add_card(client, "borrower2")
     resp = client.post(
         "/v1/projects/checkout",
         json={
@@ -70,6 +72,7 @@ def test_kit_checkout_partial_failure(client, listing, confirmed_booking):
 # ---------------------------------------------------------------------------
 
 def test_expiry_task_expires_unanswered_request(client, container, listing):
+    add_card(client, "borrower1")
     resp = client.post(
         "/v1/bookings",
         json={"listing_id": listing["id"], "start_date": "2026-08-01", "end_date": "2026-08-01"},

@@ -58,6 +58,13 @@ def create_booking_request(
         raise HTTPException(status_code=404, detail="Listing not available")
     if listing.owner_uid == uid:
         raise HTTPException(status_code=400, detail="You can't rent your own tool")
+    borrower = c.users.get(uid)
+    if not borrower or not borrower.card_on_file:
+        raise HTTPException(
+            status_code=402,
+            detail="Add a payment method before requesting a rental — it backs "
+                   "the deposit hold that protects the tool owner.",
+        )
     if c.bookings.overlapping(body.listing_id, body.start_date, body.end_date):
         raise HTTPException(status_code=409, detail="Those dates are already booked")
 

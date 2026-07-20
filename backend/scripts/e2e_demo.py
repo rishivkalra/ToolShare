@@ -82,6 +82,15 @@ def main() -> None:
     step("Geo-search finds all nearby tools", len(found) == 4, ", ".join(sorted(found)))
     step("Public search never leaks exact addresses", "Alder" not in r.text)
 
+    # 2b. Card-on-file guard --------------------------------------------------
+    r = borrower.post(
+        "/v1/bookings",
+        json={"listing_id": listings["DeWalt circular saw"], "start_date": "2026-08-01", "end_date": "2026-08-02"},
+    )
+    step("Booking without a card on file is blocked (402)", r.status_code == 402)
+    r = borrower.post("/v1/users/me/payment-method")
+    step("Card saved (staging 4242); borrower can now rent", r.json()["card_on_file"] is True)
+
     # 3. AI project kit -------------------------------------------------------
     r = borrower.post(
         "/v1/projects/plan",

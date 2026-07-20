@@ -170,6 +170,29 @@ def ensure_queue(project_id: str):
     api("POST", base, {"name": f"projects/{project_id}/locations/{REGION}/queues/{QUEUE}"})
 
 
+def ensure_photos_bucket(project_id: str) -> str:
+    bucket = f"{project_id}-photos"
+    try:
+        api("POST", f"https://storage.googleapis.com/storage/v1/b?project={project_id}",
+            {"name": bucket, "location": "US-CENTRAL1",
+             "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}}})
+        log(f"created photos bucket {bucket}")
+    except RuntimeError as e:
+        if "409" not in str(e):
+            raise
+        log(f"photos bucket {bucket}: exists")
+    # Public-read for listing photos (they are public content by design).
+    policy = api("GET", f"https://storage.googleapis.com/storage/v1/b/{bucket}/iam")
+    bindings = policy.get("bindings", [])
+    if not any(b["role"] == "roles/storage.objectViewer" and "allUsers" in b.get("members", [])
+               for b in bindings):
+        bindings.append({"role": "roles/storage.objectViewer", "members": ["allUsers"]})
+        api("PUT", f"https://storage.googleapis.com/storage/v1/b/{bucket}/iam",
+            {"bindings": bindings})
+        log("photos bucket made public-read")
+    return bucket
+
+
 def make_source_tarball() -> bytes:
     buf = io.BytesIO()
     skip = {".venv", "__pycache__", ".pytest_cache", "scripts"}
@@ -242,6 +265,7 @@ def run_env(project_id: str, base_url: str) -> list[dict]:
         "TOOLSHARE_INTERNAL_TASK_SECRET": state["internal_secret"],
         "TOOLSHARE_DEV_AUTH_ENABLED": "true",  # STAGING ONLY — false at launch
         "TOOLSHARE_PLANNER": "gemini",  # Vertex AI via service identity, no key
+        "TOOLSHARE_PHOTOS_BUCKET": f"{project_id}-photos",
         "TOOLSHARE_SERVICE_BASE_URL": base_url,
     }
     return [{"name": k, "value": v} for k, v in env.items()]
@@ -295,7 +319,8 @@ def grant_runtime_roles(project_id: str):
     crm = f"https://cloudresourcemanager.googleapis.com/v1/projects/{project_id}"
     policy = api("POST", f"{crm}:getIamPolicy", {})
     changed = False
-    for role in ("roles/datastore.user", "roles/cloudtasks.enqueuer"):
+    for role in ("roles/datastore.user", "roles/cloudtasks.enqueuer",
+                 "roles/storage.objectAdmin"):
         binding = next((b for b in policy["bindings"] if b["role"] == role), None)
         if binding is None:
             policy["bindings"].append({"role": role, "members": [member]})
@@ -321,6 +346,7 @@ def main():
     ensure_artifact_repo(project_id)
     ensure_firestore(project_id)
     ensure_queue(project_id)
+    ensure_photos_bucket(project_id)
     grant_runtime_roles(project_id)
     bucket, blob = upload_source(project_id)
     image = cloud_build(project_id, bucket, blob)

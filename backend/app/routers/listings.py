@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel
 
 from .. import geo
 from ..auth import current_uid
 from ..deps import Container, get_container
 from ..models import (
+    BookingState,
     Listing,
     ListingCreate,
     ListingSearchResult,
@@ -15,9 +17,12 @@ from ..models import (
     ListingUpdate,
     ToolCategory,
 )
+from ..pricing import rental_days
 from ..repos.memory import next_id
+from ..services.photos import MAX_PHOTO_BYTES
 
 router = APIRouter(prefix="/v1/listings", tags=["listings"])
+photos_router = APIRouter(prefix="/v1/photos", tags=["listings"])
 
 
 @router.post("", response_model=Listing, status_code=201)
@@ -86,6 +91,111 @@ def get_listing(listing_id: str, c: Container = Depends(get_container)):
     if not listing or listing.status == ListingStatus.REMOVED:
         raise HTTPException(status_code=404, detail="Listing not found")
     return listing
+
+
+@router.post("/{listing_id}/photo", response_model=Listing)
+async def upload_photo(
+    listing_id: str,
+    file: UploadFile,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """Attach a photo to a listing (owner only, max 8 photos, 5MB each)."""
+    listing = c.listings.get(listing_id)
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if listing.owner_uid != uid:
+        raise HTTPException(status_code=403, detail="Not your listing")
+    if len(listing.photos) >= 8:
+        raise HTTPException(status_code=400, detail="Photo limit reached (8)")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only images are accepted")
+    data = await file.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo too large (max 5MB)")
+    url = c.photos.save(data, file.content_type)
+    listing.photos.append(url)
+    return c.listings.update(listing)
+
+
+class RentalHistoryEntry(BaseModel):
+    booking_id: str
+    borrower_uid: str
+    borrower_name: str
+    start_date: date
+    end_date: date
+    days: int
+    state: BookingState
+    earned_cents: int
+
+
+class RentalHistory(BaseModel):
+    listing_id: str
+    title: str
+    times_rented: int
+    total_days_rented: int
+    total_earned_cents: int
+    active_borrower: str = ""  # who has it right now, if anyone
+    active_until: date | None = None
+    entries: list[RentalHistoryEntry]
+
+
+_EARNING_STATES = {BookingState.CONFIRMED, BookingState.PICKED_UP,
+                   BookingState.RETURNED, BookingState.COMPLETED, BookingState.DISPUTED}
+
+
+@router.get("/{listing_id}/history", response_model=RentalHistory)
+def rental_history(
+    listing_id: str,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """Owner-only rental log: who rented this tool, for how long, and earnings."""
+    listing = c.listings.get(listing_id)
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if listing.owner_uid != uid:
+        raise HTTPException(status_code=403, detail="Not your listing")
+
+    entries: list[RentalHistoryEntry] = []
+    active_borrower, active_until = "", None
+    for b in sorted(c.bookings.by_listing(listing_id),
+                    key=lambda x: x.start_date, reverse=True):
+        if b.state not in _EARNING_STATES:
+            continue
+        borrower = c.users.get(b.borrower_uid)
+        name = (borrower.display_name if borrower and borrower.display_name
+                else b.borrower_uid)
+        days = rental_days(b.start_date, b.end_date)
+        entries.append(RentalHistoryEntry(
+            booking_id=b.id, borrower_uid=b.borrower_uid, borrower_name=name,
+            start_date=b.start_date, end_date=b.end_date, days=days,
+            state=b.state, earned_cents=b.price.rental_cents,
+        ))
+        if b.state in (BookingState.CONFIRMED, BookingState.PICKED_UP):
+            active_borrower, active_until = name, b.end_date
+
+    return RentalHistory(
+        listing_id=listing_id,
+        title=listing.title,
+        times_rented=len(entries),
+        total_days_rented=sum(e.days for e in entries),
+        total_earned_cents=sum(e.earned_cents for e in entries),
+        active_borrower=active_borrower,
+        active_until=active_until,
+        entries=entries,
+    )
+
+
+@photos_router.get("/{name}", include_in_schema=False)
+def serve_photo(name: str, c: Container = Depends(get_container)):
+    """Serves photos in dev (prod photos live on a public GCS bucket)."""
+    blob = c.photos.get(name)
+    if not blob:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    data, content_type = blob
+    return Response(content=data, media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=31536000"})
 
 
 @router.patch("/{listing_id}", response_model=Listing)

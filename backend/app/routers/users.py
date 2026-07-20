@@ -84,6 +84,28 @@ def create_setup_intent(
     )
 
 
+class PaymentMethodStatus(BaseModel):
+    card_on_file: bool
+    card_last4: str
+
+
+@router.post("/me/payment-method", response_model=PaymentMethodStatus)
+def confirm_payment_method(
+    uid: str = Depends(current_uid), c: Container = Depends(get_container)
+):
+    """Called after the PaymentSheet saves a card: verifies with the payment
+    provider and records card-on-file status. A card on file is required
+    before any rental request — the safety anchor for both sides."""
+    user = c.users.get(uid) or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    customer_id = c.payments.ensure_customer(uid, user.stripe_customer_id)
+    user.stripe_customer_id = customer_id
+    last4 = c.payments.card_last4(customer_id)
+    user.card_on_file = last4 is not None
+    user.card_last4 = last4 or ""
+    c.users.upsert(user)
+    return PaymentMethodStatus(card_on_file=user.card_on_file, card_last4=user.card_last4)
+
+
 class PayoutSweepResponse(BaseModel):
     paid_bookings: list[str]
     total_cents: int

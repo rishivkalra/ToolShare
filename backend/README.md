@@ -25,10 +25,10 @@ curl -s -X POST localhost:8080/v1/listings \
 # borrower books it
 curl -s -X POST localhost:8080/v1/bookings \
   -H 'Authorization: Bearer dev:borrower1' -H 'Content-Type: application/json' \
-  -d '{"listing_id":"lst_000001","start_date":"2026-08-01","end_date":"2026-08-02"}'
+  -d '{"listing_id":"<id from the listing response>","start_date":"2026-08-01","end_date":"2026-08-02"}'
 
 # lender approves (charges borrower, holds deposit)
-curl -s -X POST localhost:8080/v1/bookings/bkg_000002/approve \
+curl -s -X POST localhost:8080/v1/bookings/<booking id>/approve \
   -H 'Authorization: Bearer dev:lender1'
 ```
 

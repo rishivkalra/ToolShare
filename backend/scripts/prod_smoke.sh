@@ -21,6 +21,10 @@ echo "== geo search (Firestore geohash query)"
 curl -sfS "$URL/v1/listings/search?lat=37.776&lng=-122.418&radius_km=5" \
   | python3 -c 'import sys,json;r=json.load(sys.stdin);print(len(r),"result(s):",[x["listing"]["title"] for x in r])'
 
+echo "== card on file (required before booking)"
+curl -sfS -X POST "$URL/v1/users/me/payment-method" -H "$B" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);assert d["card_on_file"];print("card:", d["card_last4"])'
+
 echo "== booking request (state machine + Cloud Tasks expiry scheduling)"
 BID=$(curl -sfS -X POST "$URL/v1/bookings" -H "$B" -H "$H" \
   -d "{\"listing_id\":\"$LID\",\"start_date\":\"2026-08-01\",\"end_date\":\"2026-08-02\"}" \

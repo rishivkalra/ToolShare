@@ -4,8 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import Settings, get_settings
-from .repos.base import BookingRepo, ListingRepo, MessageRepo, ReviewRepo, UserRepo
+from .repos.base import (
+    BookingRepo,
+    ListingRepo,
+    MessageRepo,
+    ReportRepo,
+    ReviewRepo,
+    UserRepo,
+)
 from .services.payments import FakePayments, PaymentProvider
+from .services.photos import GcsPhotoStore, MemoryPhotoStore, PhotoStore
 from .services.project_planner import ProjectPlanner, build_planner
 from .services.tasks import FakeScheduler, TaskScheduler
 
@@ -17,9 +25,11 @@ class Container:
     bookings: BookingRepo
     messages: MessageRepo
     reviews: ReviewRepo
+    reports: ReportRepo
     payments: PaymentProvider
     planner: ProjectPlanner
     tasks: TaskScheduler
+    photos: PhotoStore
 
 
 _container: Container | None = None
@@ -33,6 +43,7 @@ def build_container(settings: Settings) -> Container:
             FirestoreBookingRepo,
             FirestoreListingRepo,
             FirestoreMessageRepo,
+            FirestoreReportRepo,
             FirestoreReviewRepo,
             FirestoreUserRepo,
         )
@@ -65,17 +76,21 @@ def build_container(settings: Settings) -> Container:
             bookings=FirestoreBookingRepo(db),
             messages=FirestoreMessageRepo(db),
             reviews=FirestoreReviewRepo(db),
+            reports=FirestoreReportRepo(db),
             payments=payments,
             planner=build_planner(settings.env, settings.anthropic_api_key,
                                   settings.planner, settings.gcp_project,
                                   settings.gemini_model),
             tasks=tasks,
+            photos=GcsPhotoStore(settings.photos_bucket)
+            if settings.photos_bucket else MemoryPhotoStore(),
         )
 
     from .repos.memory import (
         MemoryBookingRepo,
         MemoryListingRepo,
         MemoryMessageRepo,
+        MemoryReportRepo,
         MemoryReviewRepo,
         MemoryUserRepo,
     )
@@ -86,11 +101,13 @@ def build_container(settings: Settings) -> Container:
         bookings=MemoryBookingRepo(),
         messages=MemoryMessageRepo(),
         reviews=MemoryReviewRepo(),
+        reports=MemoryReportRepo(),
         payments=FakePayments(),
         planner=build_planner(settings.env, settings.anthropic_api_key,
                                   settings.planner, settings.gcp_project,
                                   settings.gemini_model),
         tasks=FakeScheduler(),
+        photos=MemoryPhotoStore(),
     )
 
 

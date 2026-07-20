@@ -1,5 +1,5 @@
 """End-to-end API tests for the money loop, using in-memory repos + FakePayments."""
-from .conftest import auth
+from .conftest import add_card, auth
 
 
 def test_full_rental_happy_path(client, container, listing):
@@ -16,6 +16,15 @@ def test_full_rental_happy_path(client, container, listing):
 
     # Public listing must not leak the exact address anywhere.
     assert "123 Alder" not in resp.text
+
+    # A card on file is required before any request (safety guard).
+    resp = client.post(
+        "/v1/bookings",
+        json={"listing_id": listing["id"], "start_date": "2026-08-01", "end_date": "2026-08-02"},
+        headers=auth("borrower1"),
+    )
+    assert resp.status_code == 402
+    add_card(client, "borrower1")
 
     # Request 2 days: 2 x $8 = $16 rental + 15% fee ($2.40) = $18.40.
     resp = client.post(
@@ -87,6 +96,7 @@ def test_cannot_book_own_listing(client, listing):
 
 
 def test_double_booking_rejected(client, listing, confirmed_booking):
+    add_card(client, "borrower2")
     resp = client.post(
         "/v1/bookings",
         json={"listing_id": listing["id"], "start_date": "2026-08-02", "end_date": "2026-08-03"},
@@ -96,6 +106,7 @@ def test_double_booking_rejected(client, listing, confirmed_booking):
 
 
 def test_payment_failure_keeps_booking_approvable(client, container, listing):
+    add_card(client, "borrower1")
     resp = client.post(
         "/v1/bookings",
         json={"listing_id": listing["id"], "start_date": "2026-09-01", "end_date": "2026-09-01"},
@@ -156,6 +167,7 @@ def test_min_service_fee_applies(client, listing):
     }
     resp = client.post("/v1/listings", json=body, headers=auth("lender2"))
     lid = resp.json()["id"]
+    add_card(client, "borrower1")
     resp = client.post(
         "/v1/bookings",
         json={"listing_id": lid, "start_date": "2026-08-01", "end_date": "2026-08-01"},

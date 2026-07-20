@@ -16,9 +16,9 @@
 <header class="topbar">
   <a class="brand" href="#/browse">
     <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="3" y="13" width="26" height="16" rx="3" fill="var(--green)"/>
-      <path d="M4 14 16 4l12 10" fill="none" stroke="var(--green)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M12 22h8M16 18v8" stroke="#FBF7EE" stroke-width="2.6" stroke-linecap="round"/>
+      <rect x="3" y="13" width="26" height="16" rx="3" fill="#0E7A46"/>
+      <path d="M4 14 16 4l12 10" fill="none" stroke="#0E7A46" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M12 22h8M16 18v8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
     </svg>
     <span>ToolShare</span>
   </a>
@@ -29,7 +29,9 @@
     <a href="#/rentals" data-tab="rentals">Rentals</a>
     <a href="#/profile" data-tab="profile">Profile</a>
   </nav>
-  <button class="whoami" id="whoami" title="Switch demo user">🙂 <span id="whoami-name">…</span></button>
+  <button class="whoami" id="whoami" title="Your profile">
+    <span class="dot" id="whoami-dot">?</span><span id="whoami-name">…</span>
+  </button>
 </header>
 
 <main id="main">
@@ -38,7 +40,7 @@
   <section id="tab-browse" class="tab">
     <div class="hero">
       <h1>Borrow the tool.<br><em>Skip the purchase.</em></h1>
-      <p class="hero-sub">Your neighbors' garages hold every tool you'll ever need — rent one for a few dollars a day.</p>
+      <p class="hero-sub">Your neighbors' garages hold every tool you'll ever need — rent one for a few dollars a day, backed by deposits and verified profiles.</p>
       <div class="searchrow">
         <input id="search-input" type="search" placeholder="Try “drill”, “ladder”, “saw”…" autocomplete="off">
         <button class="btn btn-primary" id="search-btn">Search</button>
@@ -69,6 +71,13 @@
       <p class="hero-sub">You keep 100% of your listed price — borrowers pay the small service fee. Listing takes a minute.</p>
     </div>
     <form id="list-form" class="panel form">
+      <label>Photo <span class="opt">a real photo doubles your rental rate</span>
+        <div class="photopick" id="photopick">
+          <span class="ph-icon" id="photopick-icon">📷</span>
+          <span id="photopick-label">Tap to add a photo of your tool</span>
+          <input type="file" id="photo-input" accept="image/*" capture="environment">
+        </div>
+      </label>
       <label>What are you lending?
         <input name="title" required minlength="3" placeholder="e.g. DeWalt 20V cordless drill">
       </label>
@@ -90,14 +99,14 @@
         <input name="address" placeholder="123 Alder St">
       </label>
       <button class="btn btn-primary btn-big" type="submit">List my tool</button>
-      <p class="fineprint">Payouts arrive via Stripe after each rental. Approximate location only is shown publicly.</p>
+      <p class="fineprint">Payouts arrive via Stripe after each rental. Only your approximate location is shown publicly.</p>
     </form>
   </section>
 
   <!-- ============ RENTALS ============ -->
   <section id="tab-rentals" class="tab">
     <div class="hero"><h1>Your rentals</h1>
-      <p class="hero-sub">Requests, handoffs and payouts — both the tools you're borrowing and the ones you're lending.</p>
+      <p class="hero-sub">Live day counters, handoffs and payouts — the tools you're borrowing and the ones you're lending out.</p>
     </div>
     <div id="rentals-list"></div>
   </section>
@@ -105,25 +114,63 @@
   <!-- ============ PROFILE ============ -->
   <section id="tab-profile" class="tab">
     <div class="hero"><h1>Profile</h1></div>
-    <div class="panel">
-      <div class="profile-head">
-        <div class="avatar" id="profile-avatar">🙂</div>
-        <div>
-          <div class="profile-name" id="profile-name">…</div>
-          <div class="profile-rating" id="profile-rating"></div>
+    <div class="profile-grid">
+
+      <div class="panel" style="margin-bottom:0">
+        <div class="profile-head">
+          <div class="avatar" id="profile-avatar">?</div>
+          <div style="flex:1">
+            <div class="profile-name" id="profile-name">…</div>
+            <div class="profile-rating" id="profile-rating"></div>
+          </div>
         </div>
+        <div class="badges" id="profile-badges"></div>
+        <label style="font-weight:700;font-size:14px;display:block;margin-top:10px">Display name
+          <input id="name-input" placeholder="e.g. Maya R." style="margin-top:6px;font-weight:400">
+        </label>
+        <label style="font-weight:700;font-size:14px;display:block;margin-top:12px">Bio <span class="opt">shown to neighbors</span>
+          <textarea id="bio-input" rows="2" placeholder="e.g. Woodworker on Oak Ave. Happy to demo any tool!" style="margin-top:6px;font-weight:400"></textarea>
+        </label>
+        <div style="margin-top:12px"><button class="btn" id="save-profile-btn">Save profile</button></div>
+        <label class="switcher">Demo sign-in <span class="opt">staging only — Sign in with Apple/Google at launch</span>
+          <div class="searchrow">
+            <input id="uid-input" placeholder="your name, e.g. maya">
+            <button class="btn" id="uid-btn">Switch</button>
+          </div>
+        </label>
       </div>
-      <label class="switcher">Demo sign-in <span class="opt">staging only — Sign in with Apple/Google at launch</span>
-        <div class="searchrow">
-          <input id="uid-input" placeholder="your name, e.g. maya">
-          <button class="btn" id="uid-btn">Switch</button>
+
+      <div class="panel" style="margin-bottom:0">
+        <div class="section-title" style="margin-top:0">💳 Payment method</div>
+        <p class="opt" style="margin-bottom:4px">Required before renting — it backs the refundable deposit hold that protects tool owners.</p>
+        <div id="cc-visual"></div>
+        <div class="actions" style="margin-top:2px">
+          <button class="btn btn-primary" id="pay-btn">Add payment method</button>
+          <button class="btn" id="connect-btn">🏦 Set up payouts</button>
         </div>
-      </label>
-      <div class="profile-actions">
-        <button class="btn" id="pay-btn">💳 Add payment method</button>
-        <button class="btn" id="connect-btn">🏦 Set up payouts (Stripe)</button>
+        <p class="fineprint">Stripe handles card and bank details — ToolShare never sees them. In staging, a test card (•••• 4242) is saved instantly.</p>
       </div>
-      <p class="fineprint">Stripe handles identity and bank details — ToolShare never sees them. In staging, payments are simulated.</p>
+
+      <div class="panel" style="margin-bottom:0">
+        <div class="section-title" style="margin-top:0">🧰 My tools <span class="chip" id="mytools-count"></span></div>
+        <div class="stats" id="mytools-stats"></div>
+        <div id="mytools-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title" style="margin-top:0">🛡️ How ToolShare keeps both sides safe</div>
+        <ul class="safety">
+          <li>Card on file required before any rental request</li>
+          <li>Refundable deposit hold — captured only if damage is reported</li>
+          <li>Exact addresses hidden until a booking is paid and confirmed</li>
+          <li>Two-sided pickup &amp; return confirmation with a full audit trail</li>
+          <li>Day counters and overdue flags on every active rental</li>
+          <li>Mutual reviews build neighborhood reputation</li>
+          <li>Report a listing, user, or booking — founders review every report</li>
+          <li>Payments held by Stripe; owners are paid after safe return</li>
+        </ul>
+      </div>
+
     </div>
   </section>
 </main>

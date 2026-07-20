@@ -57,9 +57,14 @@ class UserProfile(BaseModel):
     uid: str
     display_name: str = ""
     photo_url: str = ""
+    bio: str = ""
     phone_verified: bool = False
     stripe_customer_id: str = ""
     stripe_connect_id: str = ""
+    # Card-on-file is required before requesting any rental — the identity
+    # anchor and deposit-hold guarantee that keeps both sides safe.
+    card_on_file: bool = False
+    card_last4: str = ""
     rating_avg: float = 0.0
     rating_count: int = 0
     created_at: Optional[datetime] = None
@@ -68,6 +73,7 @@ class UserProfile(BaseModel):
 class UserUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=80)
     photo_url: Optional[str] = None
+    bio: Optional[str] = Field(default=None, max_length=300)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +203,21 @@ class Message(BaseModel):
     booking_id: str
     sender_uid: str
     text: str
+    created_at: Optional[datetime] = None
+
+
+class ReportCreate(BaseModel):
+    target_type: str = Field(pattern="^(listing|user|booking)$")
+    target_id: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=5, max_length=2000)
+
+
+class Report(BaseModel):
+    id: str
+    reporter_uid: str
+    target_type: str
+    target_id: str
+    reason: str
     created_at: Optional[datetime] = None
 
 

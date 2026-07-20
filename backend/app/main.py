@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .routers import bookings, internal, listings, messages, projects, reviews, users
+from .routers import bookings, internal, listings, messages, projects, reports, reviews, users
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -23,6 +23,8 @@ app.include_router(messages.router)
 app.include_router(reviews.router)
 app.include_router(projects.router)
 app.include_router(internal.router)
+app.include_router(reports.router)
+app.include_router(listings.photos_router)
 
 
 @app.get("/health", tags=["ops"])

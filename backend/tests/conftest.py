@@ -22,6 +22,12 @@ def auth(uid: str) -> dict:
     return {"Authorization": f"Bearer dev:{uid}"}
 
 
+def add_card(client, uid: str):
+    """Card-on-file is required before booking; staging saves a fake 4242."""
+    resp = client.post("/v1/users/me/payment-method", headers=auth(uid))
+    assert resp.status_code == 200, resp.text
+
+
 LISTING_BODY = {
     "title": "DeWalt circular saw",
     "category": "power_tools",
@@ -43,6 +49,7 @@ def listing(client):
 
 @pytest.fixture()
 def confirmed_booking(client, listing):
+    add_card(client, "borrower1")
     resp = client.post(
         "/v1/bookings",
         json={"listing_id": listing["id"], "start_date": "2026-08-01", "end_date": "2026-08-02"},

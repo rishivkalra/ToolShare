@@ -1,8 +1,7 @@
 """In-memory repositories for local dev and tests."""
 from __future__ import annotations
 
-import itertools
-import threading
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -11,18 +10,16 @@ from ..models import (
     BookingState,
     Listing,
     Message,
+    Report,
     Review,
     TERMINAL_STATES,
     UserProfile,
 )
 
-_counter = itertools.count(1)
-_lock = threading.Lock()
-
-
 def next_id(prefix: str) -> str:
-    with _lock:
-        return f"{prefix}_{next(_counter):06d}"
+    # Random IDs: safe across processes and Cloud Run instances (a per-instance
+    # counter would collide with existing Firestore documents).
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 class MemoryUserRepo:
@@ -93,6 +90,9 @@ class MemoryBookingRepo:
             if uid in (b.borrower_uid, b.lender_uid)
         ]
 
+    def by_listing(self, listing_id: str) -> list[Booking]:
+        return [b for b in self.bookings.values() if b.listing_id == listing_id]
+
     def overlapping(self, listing_id: str, start: date, end: date) -> list[Booking]:
         blocking = {BookingState.CONFIRMED, BookingState.PICKED_UP, BookingState.APPROVED}
         return [
@@ -133,3 +133,12 @@ class MemoryReviewRepo:
             if r.booking_id == booking_id and r.from_uid == from_uid:
                 return r
         return None
+
+
+class MemoryReportRepo:
+    def __init__(self):
+        self.reports: list[Report] = []
+
+    def create(self, report: Report) -> Report:
+        self.reports.append(report)
+        return report
