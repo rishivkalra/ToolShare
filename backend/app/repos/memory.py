@@ -8,6 +8,7 @@ from typing import Optional
 from ..models import (
     Booking,
     BookingState,
+    Kit,
     Listing,
     Message,
     Notification,
@@ -16,6 +17,7 @@ from ..models import (
     Review,
     TERMINAL_STATES,
     UserProfile,
+    WantedSignal,
 )
 
 def next_id(prefix: str) -> str:
@@ -166,6 +168,33 @@ class MemoryNotificationRepo:
                 n.read = True
                 count += 1
         return count
+
+
+class MemoryKitRepo:
+    def __init__(self):
+        self.kits: dict[str, Kit] = {}
+
+    def create(self, kit: Kit) -> Kit:
+        self.kits[kit.id] = kit
+        return kit
+
+    def get(self, kit_id: str) -> Optional[Kit]:
+        return self.kits.get(kit_id)
+
+
+class MemoryWantedRepo:
+    def __init__(self):
+        self.signals: list[WantedSignal] = []
+
+    def create(self, signal: WantedSignal) -> WantedSignal:
+        self.signals.append(signal)
+        return signal
+
+    def since(self, cutoff_iso: str) -> list[WantedSignal]:
+        return [
+            s for s in self.signals
+            if s.created_at and s.created_at.isoformat() >= cutoff_iso
+        ]
 
 
 class MemoryPushSubRepo:

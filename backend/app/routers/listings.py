@@ -17,9 +17,11 @@ from ..models import (
     ListingUpdate,
     ToolCategory,
 )
+from ..models import WantedSignal
 from ..pricing import rental_days
 from ..repos.memory import next_id
 from ..services.photos import MAX_PHOTO_BYTES
+from ..services.tool_id import ToolIdSuggestion
 
 router = APIRouter(prefix="/v1/listings", tags=["listings"])
 photos_router = APIRouter(prefix="/v1/photos", tags=["listings"])
@@ -45,6 +47,7 @@ def create_listing(
         geohash=geo.encode(body.lat, body.lng),
         approx_lat=approx_lat,
         approx_lng=approx_lng,
+        instant_book=body.instant_book,
         created_at=datetime.now(timezone.utc),
     )
     c.listings.create(listing)
@@ -77,7 +80,34 @@ def search(
         if dist <= radius_km:
             results.append(ListingSearchResult(listing=l, distance_km=round(dist, 2)))
     results.sort(key=lambda r: r.distance_km)
+    if needle and not results and len(needle) >= 3:
+        # Unmet demand is a supply signal: nearby owners get a weekly
+        # "wanted near you" digest built from these.
+        c.wanted.create(WantedSignal(
+            id=next_id("wnt"), geohash=geo.encode(lat, lng)[:5],
+            term=needle[:60], source="search",
+            created_at=datetime.now(timezone.utc),
+        ))
     return results
+
+
+@router.post("/identify", response_model=ToolIdSuggestion)
+async def identify_tool(
+    file: UploadFile,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """Photo-to-listing: one photo in, a drafted listing out (Gemini vision).
+    The client prefills the form with this; the owner stays in control."""
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only images are accepted")
+    data = await file.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo too large (max 5MB)")
+    try:
+        return c.tool_id.identify(data, file.content_type or "image/jpeg")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Couldn't identify the tool — fill the form manually")
 
 
 @router.get("/mine", response_model=list[Listing])

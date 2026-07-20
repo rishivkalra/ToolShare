@@ -18,12 +18,20 @@ function enterApp() {
   location.href = "/app/#/browse";
 }
 
+// Referral attribution: /?ref=<uid> from an invite link survives until the
+// visitor actually signs in (give $10, get $10).
+const refParam = new URLSearchParams(location.search).get("ref");
+if (refParam) localStorage.setItem("ts_ref", refParam);
+
 async function onGoogleCredential(resp) {
   try {
     const r = await fetch("/v1/auth/google", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential: resp.credential }),
+      body: JSON.stringify({
+        credential: resp.credential,
+        ref: localStorage.getItem("ts_ref") || "",
+      }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || "Sign-in failed");

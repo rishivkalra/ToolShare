@@ -114,7 +114,7 @@ def enable_apis(project_id: str):
         "run.googleapis.com", "cloudbuild.googleapis.com",
         "artifactregistry.googleapis.com", "firestore.googleapis.com",
         "cloudtasks.googleapis.com", "storage.googleapis.com",
-        "cloudresourcemanager.googleapis.com",
+        "cloudresourcemanager.googleapis.com", "cloudscheduler.googleapis.com",
     ]
     log(f"enabling {len(services)} APIs")
     op = api(
@@ -168,6 +168,31 @@ def ensure_queue(project_id: str):
         pass
     log("creating cloud tasks queue")
     api("POST", base, {"name": f"projects/{project_id}/locations/{REGION}/queues/{QUEUE}"})
+
+
+def ensure_digest_job(project_id: str, base_url: str):
+    """Weekly Cloud Scheduler job: Monday 9am local -> wanted-nearby digest."""
+    if not base_url:
+        return  # first deploy doesn't know its URL yet; created on the next run
+    base = f"https://cloudscheduler.googleapis.com/v1/projects/{project_id}/locations/{REGION}/jobs"
+    job_name = f"{base}/toolshare-wanted-digest"
+    body = {
+        "name": f"projects/{project_id}/locations/{REGION}/jobs/toolshare-wanted-digest",
+        "schedule": "0 16 * * 1",  # Mondays 16:00 UTC ≈ morning US
+        "timeZone": "Etc/UTC",
+        "httpTarget": {
+            "uri": f"{base_url}/internal/tasks/wanted-digest",
+            "httpMethod": "POST",
+            "headers": {"X-Internal-Token": state["internal_secret"],
+                        "Content-Type": "application/json"},
+        },
+    }
+    try:
+        api("GET", job_name)
+        log("wanted-digest scheduler job: exists")
+    except RuntimeError:
+        log("creating wanted-digest scheduler job")
+        api("POST", base, body)
 
 
 def ensure_photos_bucket(project_id: str) -> str:
@@ -381,6 +406,7 @@ def main():
     bucket, blob = upload_source(project_id)
     image = cloud_build(project_id, bucket, blob)
     url = deploy_run(project_id, image)
+    ensure_digest_job(project_id, url)
 
     log("health check")
     for attempt in range(10):

@@ -97,12 +97,27 @@ def create_booking_request(
         )
     )
     c.bookings.create(booking)
+    borrower_name = borrower.display_name or uid
+
+    # Instant book: ID-verified borrowers on instant-book listings skip the
+    # approval wait — charge and confirm on the spot.
+    if listing.instant_book and borrower.id_verified:
+        _transition_or_409(booking, BookingState.APPROVED, booking.lender_uid, "instant book")
+        booking = charge_and_confirm(c, booking)
+        c.notifier.notify(
+            booking.lender_uid,
+            f"⚡ Instant booking — {borrower_name} rented your {listing.title}",
+            f"{booking.start_date} → {booking.end_date} · "
+            f"you earn ${booking.price.rental_cents / 100:.2f}. They're ID-verified.",
+            booking_id=booking.id,
+        )
+        return booking
+
     c.tasks.schedule(
         "/internal/tasks/expire-booking",
         {"booking_id": booking.id},
         settings.request_expiry_hours * 3600,
     )
-    borrower_name = borrower.display_name or uid
     c.notifier.notify(
         booking.lender_uid,
         f"{borrower_name} wants to rent your {listing.title}",
@@ -148,6 +163,71 @@ def get_booking(
     return booking
 
 
+def charge_and_confirm(c: Container, booking: Booking) -> Booking:
+    """APPROVED -> CONFIRMED: apply referral credit, charge the remainder,
+    hold the deposit, pay the inviter's bounty on a first rental.
+
+    Shared by lender approval and instant book. Raises 402 on payment failure
+    (booking stays APPROVED so the borrower can fix their card).
+    """
+    borrower = c.users.get(booking.borrower_uid) or UserProfile(uid=booking.borrower_uid)
+    customer_id = c.payments.ensure_customer(borrower.uid, borrower.stripe_customer_id)
+    if customer_id != borrower.stripe_customer_id:
+        borrower.stripe_customer_id = customer_id
+        c.users.upsert(borrower)
+
+    credit_used = min(borrower.credit_cents, booking.price.total_cents)
+    to_charge = booking.price.total_cents - credit_used
+    if to_charge > 0:
+        charge = c.payments.charge_rental(customer_id, to_charge, booking.id)
+        if charge.status not in ("succeeded", "requires_capture"):
+            # Payment failed: stay APPROVED; borrower is told to fix payment.
+            # Credit was not deducted — nothing to roll back.
+            c.bookings.update(booking)
+            raise HTTPException(status_code=402, detail="Payment failed; borrower must update payment method")
+        booking.stripe_payment_intent = charge.id
+    if credit_used:
+        booking.credit_applied_cents = credit_used
+        borrower.credit_cents -= credit_used
+        c.users.upsert(borrower)
+
+    if booking.price.deposit_cents > 0:
+        deposit = c.payments.hold_deposit(customer_id, booking.price.deposit_cents, booking.id)
+        booking.stripe_deposit_intent = deposit.id
+
+    _transition_or_409(booking, BookingState.CONFIRMED, "system", "payment captured")
+
+    # Referral bounty: the inviter is paid when the invited neighbor's FIRST
+    # rental actually confirms — real usage, not signups.
+    if borrower.referred_by and not borrower.referral_paid:
+        referrer = c.users.get(borrower.referred_by)
+        if referrer:
+            referrer.credit_cents += 1000
+            c.users.upsert(referrer)
+            c.notifier.notify(
+                referrer.uid,
+                "Your invite paid off — $10 rental credit 🎉",
+                f"{borrower.display_name or 'A neighbor you invited'} completed "
+                "their first booking. Credit applies to your next rental.",
+                kind="system",
+            )
+        borrower.referral_paid = True
+        c.users.upsert(borrower)
+
+    credit_note = (
+        f" (${credit_used / 100:.2f} referral credit applied)" if credit_used else ""
+    )
+    c.notifier.notify(
+        booking.borrower_uid,
+        f"Confirmed! {booking.listing_title} is yours "
+        f"{booking.start_date} → {booking.end_date}",
+        f"You've been charged{credit_note}; the deposit is a hold, not a "
+        "charge. Arrange pickup in chat.",
+        booking_id=booking.id,
+    )
+    return c.bookings.update(booking)
+
+
 @router.post("/{booking_id}/approve", response_model=Booking)
 def approve(
     booking_id: str,
@@ -156,34 +236,7 @@ def approve(
 ):
     booking = _get_booking_for(booking_id, uid, c)
     _transition_or_409(booking, BookingState.APPROVED, uid)
-
-    borrower = c.users.get(booking.borrower_uid) or UserProfile(uid=booking.borrower_uid)
-    customer_id = c.payments.ensure_customer(borrower.uid, borrower.stripe_customer_id)
-    if customer_id != borrower.stripe_customer_id:
-        borrower.stripe_customer_id = customer_id
-        c.users.upsert(borrower)
-
-    charge = c.payments.charge_rental(customer_id, booking.price.total_cents, booking.id)
-    if charge.status not in ("succeeded", "requires_capture"):
-        # Payment failed: stay APPROVED; client prompts borrower to fix payment.
-        c.bookings.update(booking)
-        raise HTTPException(status_code=402, detail="Payment failed; borrower must update payment method")
-    booking.stripe_payment_intent = charge.id
-
-    if booking.price.deposit_cents > 0:
-        deposit = c.payments.hold_deposit(customer_id, booking.price.deposit_cents, booking.id)
-        booking.stripe_deposit_intent = deposit.id
-
-    _transition_or_409(booking, BookingState.CONFIRMED, "system", "payment captured")
-    c.notifier.notify(
-        booking.borrower_uid,
-        f"Confirmed! {booking.listing_title} is yours "
-        f"{booking.start_date} → {booking.end_date}",
-        "You've been charged; the deposit is a hold, not a charge. "
-        "Arrange pickup in chat.",
-        booking_id=booking.id,
-    )
-    return c.bookings.update(booking)
+    return charge_and_confirm(c, booking)
 
 
 @router.post("/{booking_id}/decline", response_model=Booking)

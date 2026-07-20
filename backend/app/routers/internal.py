@@ -6,12 +6,15 @@ are idempotent — Cloud Tasks delivers at-least-once.
 """
 from __future__ import annotations
 
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
 from ..deps import Container, get_container
-from ..models import BookingState
+from ..models import BookingState, ListingStatus
 from ..state_machine import transition
 
 router = APIRouter(prefix="/internal/tasks", tags=["internal"])
@@ -45,3 +48,40 @@ def expire_booking(body: BookingTask, c: Container = Depends(get_container)):
         booking_id=booking.id,
     )
     return {"expired": True}
+
+
+@router.post("/wanted-digest", dependencies=[Depends(_check_token)])
+def wanted_digest(c: Container = Depends(get_container)):
+    """Weekly (Cloud Scheduler): turn last week's unmet demand into supply.
+
+    Aggregates unmatched searches + kit gaps per neighborhood and tells the
+    owners already listing there what neighbors couldn't find.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    by_hood: dict[str, Counter] = defaultdict(Counter)
+    for s in c.wanted.since(cutoff):
+        by_hood[s.geohash][s.term] += 1
+
+    owners_notified = 0
+    for gh, counter in by_hood.items():
+        owners = {
+            l.owner_uid
+            for l in c.listings.by_geohash_prefixes([gh], limit=200)
+            if l.status == ListingStatus.ACTIVE
+        }
+        if not owners:
+            continue
+        top = counter.most_common(3)
+        lines = ", ".join(
+            f"{term} ({n} neighbors)" if n > 1 else term for term, n in top
+        )
+        for owner in owners:
+            c.notifier.notify(
+                owner,
+                "🔥 Wanted near you this week",
+                f"Neighbors searched for: {lines}. Own one? Listing takes a "
+                "minute — snap a photo and the AI drafts it.",
+                kind="system",
+            )
+            owners_notified += 1
+    return {"neighborhoods": len(by_hood), "owners_notified": owners_notified}

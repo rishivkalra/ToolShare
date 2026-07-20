@@ -48,10 +48,21 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/v1/auth/google" -H "
 [ "$CODE" = "503" ] || [ "$CODE" = "401" ] || { echo "unexpected auth status $CODE"; exit 1; }
 echo "google sign-in endpoint: $CODE (expected while OAuth client unset)"
 
-echo "== project kit plan"
-curl -sfS -X POST "$URL/v1/projects/plan" -H "$B" -H "$H" -d '{
+echo "== project kit plan + shareable kit page"
+KITPATH=$(curl -sfS -X POST "$URL/v1/projects/plan" -H "$B" -H "$H" -d '{
   "description":"I want to build a raised garden bed in my backyard",
   "lat":37.776,"lng":-122.418}' \
-  | python3 -c 'import sys,json;k=json.load(sys.stdin);print("kit tools:",[i["tool"]["name"] for i in k["kit"]])'
+  | python3 -c 'import sys,json;k=json.load(sys.stdin);print(k["share_path"]);import sys as s;print("kit tools:",[i["tool"]["name"] for i in k["kit"]],file=s.stderr)')
+curl -sfS "$URL$KITPATH" | grep -q "Rent this kit" && echo "kit page ok: $KITPATH"
+
+echo "== neighborhood stats + public scoreboard"
+NPATH=$(curl -sfS "$URL/v1/neighborhoods?lat=37.776&lng=-122.418" \
+  | python3 -c 'import sys,json;n=json.load(sys.stdin);print(n["page_path"]);import sys as s;print("listings:",n["listings"],"saved:",n["saved_cents"],file=s.stderr)')
+curl -sfS "$URL$NPATH" | grep -q "tools listed" && echo "neighborhood page ok: $NPATH"
+
+echo "== photo-to-listing identify (Gemini vision)"
+python3 -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))' > /tmp/px.png
+curl -sfS -X POST "$URL/v1/listings/identify" -H "$L" -F "file=@/tmp/px.png;type=image/png" \
+  | python3 -c 'import sys,json;s=json.load(sys.stdin);print("identified:",s["title"],f"(confidence {s[\"confidence\"]})")'
 
 echo "SMOKE-OK"

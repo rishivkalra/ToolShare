@@ -122,7 +122,8 @@ function route() {
   TABS.forEach((t) => $(`#tab-${t}`).classList.toggle("active", t === active));
   document.querySelectorAll("[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === active));
-  if (active === "browse") loadBrowse();
+  if (active === "browse") { loadBrowse(); loadHood(); }
+  if (active === "list") loadWanted();
   if (active === "rentals") loadRentals();
   if (active === "profile") loadProfile();
   window.scrollTo({ top: 0 });
@@ -185,6 +186,58 @@ function renderBrowse() {
   grid.querySelectorAll(".toolcard").forEach((el) => {
     el.onclick = () => openListing(el.dataset.id);
   });
+}
+
+/* ---------------- neighborhood bar & wanted-nearby ---------------- */
+
+async function loadHood() {
+  const bar = $("#hoodbar");
+  try {
+    const s = await api("GET",
+      `/v1/neighborhoods?lat=${store.loc.lat}&lng=${store.loc.lng}`);
+    store.hood = s;
+    const inviteUrl = `${location.origin}/?ref=${encodeURIComponent(store.uid)}`;
+    const pct = Math.min(100, Math.round(s.listings * 100 / s.unlock_target));
+    bar.innerHTML = `<div class="hoodbar">
+      <span class="hb-text">${s.unlocked
+        ? `🏡 Your neighborhood is live — ${s.listings} tools · $${(s.saved_cents / 100).toFixed(0)} in purchases avoided`
+        : `🔓 ${s.listings} of ${s.unlock_target} tools to unlock your neighborhood`}</span>
+      <a href="${esc(s.page_path)}" target="_blank">scoreboard ↗</a>
+      <button id="hb-invite">invite a neighbor (+$10 each)</button>
+      ${s.unlocked ? "" : `<div class="hb-bar"><div class="hb-fill" style="width:${pct}%"></div></div>
+      <span class="hb-sub">Every tool listed gets the whole street closer. Inviting a garage-owning neighbor is worth $10 to you both.</span>`}
+    </div>`;
+    $("#hb-invite").onclick = async () => {
+      if (navigator.share) {
+        navigator.share({ title: "ToolShare — rent any tool from a neighbor", url: inviteUrl }).catch(() => {});
+      } else {
+        await navigator.clipboard.writeText(inviteUrl).catch(() => {});
+        toast("Invite link copied — worth $10 to you and your neighbor 🎁");
+      }
+    };
+  } catch { bar.innerHTML = ""; }
+}
+
+async function loadWanted() {
+  const box = $("#wanted-box");
+  try {
+    const s = store.hood || await api("GET",
+      `/v1/neighborhoods?lat=${store.loc.lat}&lng=${store.loc.lng}`);
+    if (!s.wanted.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="wantedbox">
+      <div class="wb-title">🔥 Wanted nearby — neighbors searched for these and found nothing</div>
+      <div class="chips">${s.wanted.map((w) =>
+        `<button class="wantedchip" data-term="${esc(w.term)}"><b>${esc(w.term)}</b>${w.count > 1 ? ` · ${w.count} asks` : ""}</button>`).join("")}</div>
+    </div>`;
+    box.querySelectorAll(".wantedchip").forEach((el) => {
+      el.onclick = () => {
+        const f = $("#list-form");
+        f.title.value = el.dataset.term;
+        f.title.focus();
+        toast("Pre-filled — neighbors are already searching for this 🔥");
+      };
+    });
+  } catch { box.innerHTML = ""; }
 }
 
 /* ---------------- map view (vendored Leaflet + OSM tiles) ---------------- */
@@ -336,6 +389,9 @@ async function openListing(id) {
       `<div class="grand">Total ${dollars(rental + fee(rental) + PROTECTION_FEE_CENTS)}</div>
        <div class="protectline">🛡️ ToolShare Guarantee — covered up to $2,500 against damage or theft</div>`;
     btn.disabled = false;
+    btn.textContent = (l.instant_book && store.me && store.me.id_verified)
+      ? "⚡ Book now — no approval wait"
+      : "Request to rent";
   };
   const bindCal = () => {
     $("#m-cal [data-cal=prev]").onclick = () => { calYM = prevYM(calYM); render(); };
@@ -358,7 +414,8 @@ async function openListing(id) {
       <h2>${esc(l.title)}</h2>
       <p style="color:var(--muted);margin:6px 0 2px">
         ${CATEGORIES[l.category] || "🧰"} ${esc(l.category.replace(/_/g, " "))} · condition: ${esc(l.condition)}
-        ${l.rating_count ? ` · ★ ${l.rating_avg} (${l.rating_count})` : ""}</p>
+        ${l.rating_count ? ` · ★ ${l.rating_avg} (${l.rating_count})` : ""}
+        ${l.instant_book ? ' <span class="instantchip">⚡ Instant book</span>' : ""}</p>
       <p style="margin:6px 0 2px;font-size:14px">Owner: <b>${esc(owner.display_name || l.owner_uid)}</b>
         ${owner.id_verified ? `<span class="chip ok">🪪 ID verified</span>` : ""}
         ${owner.rating_count ? `<span class="chip ok">★ ${owner.rating_avg}</span>` : `<span class="chip">new lender</span>`}</p>
@@ -374,10 +431,12 @@ async function openListing(id) {
   $("#m-report").onclick = () => reportTarget("listing", l.id);
   $("#m-request").onclick = async () => {
     try {
-      await api("POST", "/v1/bookings",
+      const b = await api("POST", "/v1/bookings",
         { listing_id: l.id, start_date: sel.start, end_date: sel.end || sel.start });
       closeModal();
-      toast("Requested! The owner has 24h to accept — track it in Rentals.");
+      toast(b.state === "confirmed"
+        ? "⚡ Booked instantly — it's yours! Arrange pickup in chat."
+        : "Requested! The owner has 24h to accept — track it in Rentals.");
       location.hash = "#/rentals";
     } catch (e) {
       if (handleCardRequired(e)) { closeModal(); return; }
@@ -448,6 +507,10 @@ function renderKit(kit) {
         <button class="btn btn-primary btn-big" id="kit-checkout">Request whole kit · ${rentable.length} tools</button>
         <span class="opt">for tomorrow — owners confirm individually</span>
       </div>` : ""}
+    ${kit.kit_id ? `<div class="sharekit">
+        <button class="btn" id="kit-share">🔗 Share this kit</button>
+        <span class="opt">public page — friends see the plan, owners see the demand</span>
+      </div>` : ""}
     <div class="kit-notes">
       ${kit.missing_tools.length ? `⏳ Not nearby yet: <b>${kit.missing_tools.map(esc).join(", ")}</b>. We'll notify you when a neighbor lists one.<br>` : ""}
       ${kit.plan.consumables_note ? `🛒 ${esc(kit.plan.consumables_note)}<br>` : ""}
@@ -456,6 +519,16 @@ function renderKit(kit) {
   document.querySelectorAll(".kititem[data-listing]").forEach((el) => {
     el.onclick = () => openListing(el.dataset.listing);
   });
+  const share = $("#kit-share");
+  if (share) share.onclick = async () => {
+    const url = location.origin + kit.share_path;
+    if (navigator.share) {
+      navigator.share({ title: kit.plan.project_summary, url }).catch(() => {});
+    } else {
+      await navigator.clipboard.writeText(url).catch(() => {});
+      toast("Kit link copied — send it to a friend 🔗");
+    }
+  };
   const co = $("#kit-checkout");
   if (co) co.onclick = async () => {
     co.disabled = true; co.textContent = "Requesting kit…";
@@ -486,8 +559,28 @@ function bindPhotoPicker() {
     store.photoBlob = await downscale(file, 1280, 0.85);
     const url = URL.createObjectURL(store.photoBlob);
     $("#photopick-icon").outerHTML = `<img id="photopick-icon" src="${url}" alt="preview">`;
-    $("#photopick-label").textContent = "Looks great — tap to change";
+    $("#photopick-label").textContent = "✨ Identifying your tool…";
+    identifyTool(store.photoBlob);
   };
+}
+
+async function identifyTool(blob) {
+  // Photo-to-listing: Gemini names the tool and drafts the whole form.
+  try {
+    const s = await apiUpload("/v1/listings/identify", blob, "tool.jpg");
+    const f = $("#list-form");
+    f.title.value = s.title;
+    f.category.value = s.category;
+    if (s.description) f.description.value = s.description;
+    f.price.value = (s.price_per_day_cents / 100).toFixed(0);
+    f.deposit.value = (s.deposit_cents / 100).toFixed(0);
+    $("#photopick-label").textContent = "Looks great — tap to change";
+    toast(s.confidence >= 0.5
+      ? `✨ Recognized: ${s.title} — check the details and hit list!`
+      : "✨ Best guess filled in — please double-check the details", false);
+  } catch {
+    $("#photopick-label").textContent = "Looks great — tap to change";
+  }
 }
 
 function downscale(file, maxDim, quality) {
@@ -520,6 +613,7 @@ async function submitListing(ev) {
       deposit_cents: Math.round(parseFloat(f.deposit.value || "0") * 100),
       lat: store.loc.lat, lng: store.loc.lng,
       exact_address: f.address.value.trim(),
+      instant_book: $("#instant-check").checked,
     });
     if (store.photoBlob) {
       btn.textContent = "Uploading photo…";
@@ -716,8 +810,13 @@ async function loadProfile() {
       p.stripe_connect_id ? `<span class="badge">🏦 Payouts active</span>` : "",
       p.rating_count > 0 ? `<span class="badge">⭐ Reviewed neighbor</span>` : "",
     ].join("") || `<span class="chip">New neighbor — add a card to start renting</span>`;
+    store.me = p;
     renderCard(p, name);
     renderLadder(p);
+    $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
+    $("#credit-chip").innerHTML = p.credit_cents > 0
+      ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
+      : `<span class="opt">No credit yet — every accepted invite is worth $10.</span>`;
     loadMyTools();
   } catch (e) { toast(e.message, true); }
 }
@@ -1024,6 +1123,11 @@ function boot() {
   };
   $("#view-list").onclick = () => { store.view = "list"; renderBrowse(); };
   $("#view-map").onclick = () => { store.view = "map"; renderBrowse(); };
+  $("#ref-copy").onclick = async () => {
+    await navigator.clipboard.writeText($("#ref-link").value).catch(() => {});
+    toast("Invite link copied — worth $10 to you and your neighbor 🎁");
+  };
+  api("GET", "/v1/users/me").then((p) => { store.me = p; }).catch(() => {});
   $("#bell").onclick = toggleNotifPanel;
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest("#notif-panel, #bell")) $("#notif-panel").hidden = true;

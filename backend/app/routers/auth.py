@@ -36,6 +36,7 @@ def auth_config(settings: Settings = Depends(get_settings)):
 
 class GoogleSignIn(BaseModel):
     credential: str
+    ref: str = ""  # inviter uid from a ?ref= link (give $10 / get $10)
 
 
 class SessionResponse(BaseModel):
@@ -60,7 +61,18 @@ def google_sign_in(
         raise HTTPException(status_code=401, detail="Google sign-in failed — try again")
 
     uid = f"g{guser.sub}"
-    user = c.users.get(uid) or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    existing = c.users.get(uid)
+    user = existing or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    # Referral attribution: first sign-in only, never self-referral. The new
+    # neighbor gets $10 now; the inviter is paid at the first confirmed rental.
+    if existing is None and body.ref and body.ref != uid and c.users.get(body.ref):
+        user.referred_by = body.ref
+        user.credit_cents += 1000
+        c.notifier.notify(
+            uid, "Welcome — $10 rental credit applied 🎉",
+            "Your neighbor's invite came with $10 off your first rental.",
+            kind="system",
+        )
     user.email = guser.email or user.email
     user.display_name = user.display_name or guser.name
     user.photo_url = user.photo_url or guser.picture

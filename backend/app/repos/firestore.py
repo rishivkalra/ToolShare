@@ -20,6 +20,7 @@ from google.cloud import firestore
 from ..models import (
     Booking,
     BookingState,
+    Kit,
     Listing,
     Message,
     Notification,
@@ -27,6 +28,7 @@ from ..models import (
     Report,
     Review,
     UserProfile,
+    WantedSignal,
 )
 
 
@@ -186,6 +188,32 @@ class FirestoreReportRepo:
     def create(self, report: Report) -> Report:
         self.col.document(report.id).set(report.model_dump(exclude={"id"}, mode="json"))
         return report
+
+
+class FirestoreKitRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("kits")
+
+    def create(self, kit: Kit) -> Kit:
+        self.col.document(kit.id).set(kit.model_dump(exclude={"id"}, mode="json"))
+        return kit
+
+    def get(self, kit_id: str):
+        return _doc_to(Kit, self.col.document(kit_id).get())
+
+
+class FirestoreWantedRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("wanted")
+
+    def create(self, signal: WantedSignal) -> WantedSignal:
+        self.col.document(signal.id).set(signal.model_dump(exclude={"id"}, mode="json"))
+        return signal
+
+    def since(self, cutoff_iso: str) -> list[WantedSignal]:
+        # created_at is stored as an ISO string; lexicographic range works.
+        docs = self.col.where("created_at", ">=", cutoff_iso).limit(2000).stream()
+        return [_doc_to(WantedSignal, d) for d in docs]
 
 
 class FirestoreNotificationRepo:

@@ -9,6 +9,7 @@ from typing import Optional, Protocol
 
 from ..models import (
     Booking,
+    Kit,
     Listing,
     Message,
     Notification,
@@ -16,6 +17,7 @@ from ..models import (
     Report,
     Review,
     UserProfile,
+    WantedSignal,
 )
 
 
@@ -68,3 +70,13 @@ class PushSubRepo(Protocol):
     def upsert(self, sub: PushSubscription) -> None: ...
     def for_user(self, uid: str) -> list[PushSubscription]: ...
     def remove(self, uid: str, endpoint: str) -> None: ...
+
+
+class KitRepo(Protocol):
+    def create(self, kit: Kit) -> Kit: ...
+    def get(self, kit_id: str) -> Optional[Kit]: ...
+
+
+class WantedRepo(Protocol):
+    def create(self, signal: WantedSignal) -> WantedSignal: ...
+    def since(self, cutoff_iso: str) -> list[WantedSignal]: ...

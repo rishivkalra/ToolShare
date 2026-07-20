@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .config import Settings, get_settings
 from .repos.base import (
     BookingRepo,
+    KitRepo,
     ListingRepo,
     MessageRepo,
     NotificationRepo,
@@ -13,10 +14,12 @@ from .repos.base import (
     ReportRepo,
     ReviewRepo,
     UserRepo,
+    WantedRepo,
 )
 from .services.google_auth import GoogleVerifier, build_verifier
 from .services.identity import FakeIdentity, IdentityProvider, StripeIdentity
 from .services.notify import Notifier
+from .services.tool_id import ToolIdentifier, build_identifier
 from .services.payments import FakePayments, PaymentProvider
 from .services.photos import GcsPhotoStore, MemoryPhotoStore, PhotoStore
 from .services.project_planner import ProjectPlanner, build_planner
@@ -40,6 +43,9 @@ class Container:
     push_subs: PushSubRepo
     notifier: Notifier
     identity: IdentityProvider
+    kits: KitRepo
+    wanted: WantedRepo
+    tool_id: ToolIdentifier
 
 
 _container: Container | None = None
@@ -51,6 +57,7 @@ def build_container(settings: Settings) -> Container:
 
         from .repos.firestore import (
             FirestoreBookingRepo,
+            FirestoreKitRepo,
             FirestoreListingRepo,
             FirestoreMessageRepo,
             FirestoreNotificationRepo,
@@ -58,6 +65,7 @@ def build_container(settings: Settings) -> Container:
             FirestoreReportRepo,
             FirestoreReviewRepo,
             FirestoreUserRepo,
+            FirestoreWantedRepo,
         )
         from .services.payments import StripePayments
         from .services.tasks import CloudTasksScheduler
@@ -103,10 +111,15 @@ def build_container(settings: Settings) -> Container:
                               settings.vapid_private_key, settings.vapid_subject),
             identity=StripeIdentity(settings.stripe_secret_key, settings.service_base_url)
             if settings.stripe_secret_key else FakeIdentity(),
+            kits=FirestoreKitRepo(db),
+            wanted=FirestoreWantedRepo(db),
+            tool_id=build_identifier(settings.planner, settings.gcp_project,
+                                     settings.gemini_model),
         )
 
     from .repos.memory import (
         MemoryBookingRepo,
+        MemoryKitRepo,
         MemoryListingRepo,
         MemoryMessageRepo,
         MemoryNotificationRepo,
@@ -114,6 +127,7 @@ def build_container(settings: Settings) -> Container:
         MemoryReportRepo,
         MemoryReviewRepo,
         MemoryUserRepo,
+        MemoryWantedRepo,
     )
 
     return Container(
@@ -135,6 +149,10 @@ def build_container(settings: Settings) -> Container:
         notifier=Notifier(notif_repo, subs_repo,
                           settings.vapid_private_key, settings.vapid_subject),
         identity=FakeIdentity(),
+        kits=MemoryKitRepo(),
+        wanted=MemoryWantedRepo(),
+        tool_id=build_identifier(settings.planner, settings.gcp_project,
+                                 settings.gemini_model),
     )
 
 

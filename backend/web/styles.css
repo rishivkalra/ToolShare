@@ -454,3 +454,46 @@ textarea { resize: vertical; }
 .protectline { display: flex; align-items: center; gap: 6px; margin-top: 8px;
   font-size: 13px; color: var(--green-deep); font-weight: 650;
   background: var(--wash-green); border-radius: 10px; padding: 8px 12px; }
+
+/* ---------------- sprint 2 ---------------- */
+.hoodbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  background: var(--wash-green); border: 1px solid #DCEEE2; border-radius: 14px;
+  padding: 12px 16px; margin-top: 16px; font-size: 14px; max-width: 680px;
+}
+.hoodbar .hb-text { font-weight: 700; color: var(--green-deep); }
+.hoodbar .hb-sub { color: var(--muted); font-size: 12.5px; flex-basis: 100%; }
+.hoodbar .hb-bar { flex-basis: 100%; height: 8px; background: #fff;
+  border-radius: 999px; overflow: hidden; }
+.hoodbar .hb-fill { height: 100%; background: var(--green-grad); border-radius: 999px; }
+.hoodbar a { color: var(--green-deep); font-weight: 700; }
+.hoodbar button { border: 0; background: none; color: var(--green-deep);
+  font-weight: 750; cursor: pointer; text-decoration: underline; font-size: 13.5px; padding: 0; }
+
+.wantedbox {
+  border: 1px dashed var(--amber); background: var(--amber-soft);
+  border-radius: 14px; padding: 14px 16px; margin-bottom: 18px; max-width: 640px;
+}
+.wantedbox .wb-title { font-weight: 800; color: #96660F; font-size: 14px; margin-bottom: 8px; }
+.wantedbox .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wantedchip {
+  border: 1px solid #F3DFB4; background: #fff; border-radius: 999px;
+  padding: 6px 14px; font: 700 13px var(--body); cursor: pointer; color: #7A5410;
+}
+.wantedchip:hover { background: var(--amber-soft); }
+.wantedchip b { color: var(--ink); }
+
+.checkrow { display: flex; gap: 10px; align-items: flex-start; font-weight: 500 !important;
+  font-size: 14px; color: var(--muted); cursor: pointer; }
+.checkrow input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--green); }
+
+.refbox { display: flex; gap: 8px; flex-wrap: wrap; }
+.refbox input { flex: 1; min-width: 180px; border: 1.5px solid var(--line);
+  border-radius: 12px; padding: 10px 12px; font: 600 13px var(--body); color: var(--muted); background: var(--wash); }
+.credit-pill { display: inline-flex; align-items: center; gap: 6px;
+  background: var(--green-grad); color: #fff; border-radius: 999px;
+  padding: 6px 14px; font: 750 13.5px var(--body); }
+
+.sharekit { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.instantchip { background: var(--amber-soft); color: #96660F; border: 1px solid #F3DFB4;
+  border-radius: 999px; padding: 3px 11px; font: 750 12px var(--body); }

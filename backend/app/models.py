@@ -67,6 +67,11 @@ class UserProfile(BaseModel):
     card_on_file: bool = False
     card_last4: str = ""
     id_verified: bool = False  # government-ID check (Stripe Identity in prod)
+    # Referral program: give $10, get $10. The inviter is paid when the
+    # invited neighbor's first rental confirms (not at signup — gaming filter).
+    credit_cents: int = 0
+    referred_by: str = ""
+    referral_paid: bool = False
     rating_avg: float = 0.0
     rating_count: int = 0
     created_at: Optional[datetime] = None
@@ -93,6 +98,7 @@ class ListingCreate(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
     exact_address: str = Field(default="", max_length=300)
+    instant_book: bool = False  # ID-verified borrowers skip the approval wait
 
     @field_validator("title")
     @classmethod
@@ -109,6 +115,7 @@ class ListingUpdate(BaseModel):
     deposit_cents: Optional[int] = Field(default=None, ge=0, le=200_000)
     status: Optional[ListingStatus] = None
     blackout_dates: Optional[list[date]] = Field(default=None, max_length=180)
+    instant_book: Optional[bool] = None
 
 
 class Listing(BaseModel):
@@ -127,6 +134,7 @@ class Listing(BaseModel):
     approx_lat: float = 0.0
     approx_lng: float = 0.0
     status: ListingStatus = ListingStatus.ACTIVE
+    instant_book: bool = False
     # Days the owner has blocked out (vacations, own use); bookings can't
     # overlap these and the calendar shows them as unavailable.
     blackout_dates: list[date] = Field(default_factory=list)
@@ -192,6 +200,7 @@ class Booking(BaseModel):
     stripe_payment_intent: str = ""
     stripe_deposit_intent: str = ""
     stripe_transfer_id: str = ""
+    credit_applied_cents: int = 0  # referral credit consumed by this booking
     borrower_marked_pickup: bool = False
     lender_marked_pickup: bool = False
     exact_address: str = ""  # populated only for participants once CONFIRMED
@@ -227,6 +236,43 @@ class Report(BaseModel):
     target_type: str
     target_id: str
     reason: str
+    created_at: Optional[datetime] = None
+
+
+class KitItemSnapshot(BaseModel):
+    """A tool slot in a saved kit, frozen at plan time for the public page."""
+
+    name: str
+    category: ToolCategory
+    why: str = ""
+    optional: bool = False
+    listing_id: str = ""  # best match at plan time ("" = gap)
+    listing_title: str = ""
+    price_per_day_cents: int = 0
+    distance_km: float = 0.0
+
+
+class Kit(BaseModel):
+    id: str
+    owner_uid: str
+    description: str
+    summary: str
+    items: list[KitItemSnapshot]
+    missing: list[str] = Field(default_factory=list)
+    total_per_day_cents: int = 0
+    buy_estimate_cents: int = 0  # what buying all this would roughly cost
+    geohash: str = ""  # 5-char neighborhood prefix
+    created_at: Optional[datetime] = None
+
+
+class WantedSignal(BaseModel):
+    """Unmet demand: an unmatched search or a kit gap, localized by geohash."""
+
+    id: str
+    geohash: str  # 5-char neighborhood prefix
+    term: str
+    source: str = "search"  # search | kit
+    uid: str = ""
     created_at: Optional[datetime] = None
 
 

@@ -2,7 +2,7 @@
 what's actually rentable nearby — the whole kit in one screen."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -11,9 +11,22 @@ from .. import geo
 from ..auth import current_uid
 from ..config import Settings, get_settings
 from ..deps import Container, get_container
-from ..models import Booking, BookingCreate, Listing, ListingStatus
+from ..models import (
+    Booking,
+    BookingCreate,
+    Kit,
+    KitItemSnapshot,
+    Listing,
+    ListingStatus,
+    WantedSignal,
+)
+from ..repos.memory import next_id
 from ..services.project_planner import PlannedTool, ProjectPlan
 from .bookings import create_booking_request
+
+# Rough "what buying this would cost" anchor for the share page: a tool's
+# purchase price is on the order of 35 daily rentals.
+BUY_MULTIPLE = 35
 
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
@@ -35,6 +48,8 @@ class ProjectKitResponse(BaseModel):
     kit: list[KitItem]
     total_estimated_per_day_cents: int  # cheapest match per required tool
     missing_tools: list[str]  # required tools with no nearby listing
+    kit_id: str = ""  # saved kit — /kit/{kit_id} is its shareable public page
+    share_path: str = ""
 
 
 def _match_listings(
@@ -82,11 +97,51 @@ def plan_project(
         elif not tool.optional:
             missing.append(tool.name)
 
+    gh5 = geo.encode(body.lat, body.lng)[:5]
+    now = datetime.now(timezone.utc)
+    for term in missing:
+        c.wanted.create(WantedSignal(
+            id=next_id("wnt"), geohash=gh5, term=term.lower()[:60],
+            source="kit", uid=uid, created_at=now,
+        ))
+
+    # Persist the kit so it has a shareable public page — the viral unit.
+    buy_estimate = sum(
+        i.matches[0].price_per_day_cents * BUY_MULTIPLE for i in kit if i.matches
+    )
+    saved = c.kits.create(Kit(
+        id=next_id("kit"),
+        owner_uid=uid,
+        description=body.description.strip()[:300],
+        summary=plan.project_summary,
+        items=[
+            KitItemSnapshot(
+                name=i.tool.name, category=i.tool.category, why=i.tool.why,
+                optional=i.tool.optional,
+                listing_id=i.matches[0].id if i.matches else "",
+                listing_title=i.matches[0].title if i.matches else "",
+                price_per_day_cents=i.matches[0].price_per_day_cents if i.matches else 0,
+                distance_km=round(geo.haversine_km(
+                    body.lat, body.lng,
+                    i.matches[0].approx_lat, i.matches[0].approx_lng), 1)
+                if i.matches else 0.0,
+            )
+            for i in kit
+        ],
+        missing=missing,
+        total_per_day_cents=total,
+        buy_estimate_cents=buy_estimate,
+        geohash=gh5,
+        created_at=now,
+    ))
+
     return ProjectKitResponse(
         plan=plan,
         kit=kit,
         total_estimated_per_day_cents=total,
         missing_tools=missing,
+        kit_id=saved.id,
+        share_path=f"/kit/{saved.id}",
     )
 
 
