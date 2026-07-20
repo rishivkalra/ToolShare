@@ -63,6 +63,6 @@ curl -sfS "$URL$NPATH" | grep -q "tools listed" && echo "neighborhood page ok: $
 echo "== photo-to-listing identify (Gemini vision)"
 python3 -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))' > /tmp/px.png
 curl -sfS -X POST "$URL/v1/listings/identify" -H "$L" -F "file=@/tmp/px.png;type=image/png" \
-  | python3 -c 'import sys,json;s=json.load(sys.stdin);print("identified:",s["title"],f"(confidence {s[\"confidence\"]})")'
+  | python3 -c 'import sys,json;s=json.load(sys.stdin);print("identified:", s["title"], "confidence", s["confidence"])'
 
 echo "SMOKE-OK"
