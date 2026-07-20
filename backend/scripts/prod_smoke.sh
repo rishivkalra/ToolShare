@@ -35,6 +35,19 @@ echo "== lender approves (staging FakePayments)"
 curl -sfS -X POST "$URL/v1/bookings/$BID/approve" -H "$L" \
   | python3 -c 'import sys,json;b=json.load(sys.stdin);assert b["state"]=="confirmed",b;print("confirmed, deposit:",b["stripe_deposit_intent"])'
 
+echo "== landing page served at /"
+curl -sfS "$URL/" | grep -q "Borrow the tool" && echo "landing html ok"
+curl -sfS -o /dev/null "$URL/app/landing.css" && echo "landing css ok"
+curl -sfS -o /dev/null "$URL/app/landing.js" && echo "landing js ok"
+
+echo "== auth config + session tokens"
+curl -sfS "$URL/v1/auth/config" \
+  | python3 -c 'import sys,json;c=json.load(sys.stdin);print("google:",c["google_client_id"] or "(not configured)","dev_auth:",c["dev_auth"])'
+# Without a Google client id the endpoint must refuse cleanly (503), never 500.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/v1/auth/google" -H "$H" -d '{"credential":"x"}')
+[ "$CODE" = "503" ] || [ "$CODE" = "401" ] || { echo "unexpected auth status $CODE"; exit 1; }
+echo "google sign-in endpoint: $CODE (expected while OAuth client unset)"
+
 echo "== project kit plan"
 curl -sfS -X POST "$URL/v1/projects/plan" -H "$B" -H "$H" -d '{
   "description":"I want to build a raised garden bed in my backyard",
