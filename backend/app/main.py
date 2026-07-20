@@ -17,6 +17,7 @@ from .routers import (
     public,
     reports,
     reviews,
+    searches,
     users,
     webhooks,
 )
@@ -42,6 +43,7 @@ app.include_router(reports.router)
 app.include_router(notifications.router)
 app.include_router(webhooks.router)
 app.include_router(neighborhoods.router)
+app.include_router(searches.router)
 app.include_router(public.router)
 app.include_router(listings.photos_router)
 

@@ -19,6 +19,7 @@ MAX_PHOTO_BYTES = 5 * 1024 * 1024
 class PhotoStore(Protocol):
     def save(self, data: bytes, content_type: str) -> str: ...
     def get(self, name: str) -> Optional[tuple[bytes, str]]: ...
+    def load(self, url: str) -> Optional[tuple[bytes, str]]: ...
 
 
 def make_name(content_type: str) -> str:
@@ -37,6 +38,9 @@ class MemoryPhotoStore:
     def get(self, name: str) -> Optional[tuple[bytes, str]]:
         return self.blobs.get(name)
 
+    def load(self, url: str) -> Optional[tuple[bytes, str]]:
+        return self.get(url.rsplit("/", 1)[-1])
+
 
 class GcsPhotoStore:
     def __init__(self, bucket_name: str):
@@ -53,3 +57,15 @@ class GcsPhotoStore:
 
     def get(self, name: str) -> Optional[tuple[bytes, str]]:
         return None  # GCS photos are served directly by the public bucket
+
+    def load(self, url: str) -> Optional[tuple[bytes, str]]:
+        """Fetch photo bytes back for AI analysis (damage comparison)."""
+        prefix = f"https://storage.googleapis.com/{self.bucket_name}/"
+        if not url.startswith(prefix):
+            return None
+        blob = self.bucket.blob(url.removeprefix(prefix))
+        try:
+            data = blob.download_as_bytes()
+        except Exception:
+            return None
+        return data, blob.content_type or "image/jpeg"

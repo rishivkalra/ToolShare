@@ -27,6 +27,7 @@ from ..models import (
     PushSubscription,
     Report,
     Review,
+    SavedSearch,
     UserProfile,
     WantedSignal,
 )
@@ -214,6 +215,30 @@ class FirestoreWantedRepo:
         # created_at is stored as an ISO string; lexicographic range works.
         docs = self.col.where("created_at", ">=", cutoff_iso).limit(2000).stream()
         return [_doc_to(WantedSignal, d) for d in docs]
+
+
+class FirestoreSavedSearchRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("saved_searches")
+
+    def create(self, search: SavedSearch) -> SavedSearch:
+        self.col.document(search.id).set(search.model_dump(exclude={"id"}, mode="json"))
+        return search
+
+    def for_geohash(self, geohash: str) -> list[SavedSearch]:
+        docs = self.col.where("geohash", "==", geohash).limit(500).stream()
+        return [_doc_to(SavedSearch, d) for d in docs]
+
+    def for_user(self, uid: str) -> list[SavedSearch]:
+        docs = self.col.where("uid", "==", uid).limit(50).stream()
+        return [_doc_to(SavedSearch, d) for d in docs]
+
+    def delete(self, search_id: str, uid: str) -> bool:
+        doc = self.col.document(search_id).get()
+        if doc.exists and doc.to_dict().get("uid") == uid:
+            doc.reference.delete()
+            return True
+        return False
 
 
 class FirestoreNotificationRepo:

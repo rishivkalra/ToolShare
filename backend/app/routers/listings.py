@@ -43,6 +43,7 @@ def create_listing(
         condition=body.condition,
         photos=body.photos,
         price_per_day_cents=body.price_per_day_cents,
+        price_per_week_cents=body.price_per_week_cents,
         deposit_cents=body.deposit_cents,
         geohash=geo.encode(body.lat, body.lng),
         approx_lat=approx_lat,
@@ -53,6 +54,21 @@ def create_listing(
     c.listings.create(listing)
     if body.exact_address:
         c.listings.set_exact_address(listing.id, body.exact_address)
+
+    # Saved-search alerts: neighbors waiting for exactly this get pinged now.
+    title_words = set(listing.title.lower().replace("-", " ").split())
+    for s in c.saved_searches.for_geohash(listing.geohash[:5]):
+        if s.uid == uid:
+            continue
+        needle_words = set(s.term.lower().split())
+        if s.term.lower() in listing.title.lower() or needle_words <= title_words:
+            c.notifier.notify(
+                s.uid,
+                f"🔔 A neighbor just listed: {listing.title}",
+                f"You asked to hear about “{s.term}” — it's now "
+                f"${listing.price_per_day_cents / 100:.0f}/day nearby.",
+                kind="system",
+            )
     return listing
 
 
@@ -89,6 +105,45 @@ def search(
             created_at=datetime.now(timezone.utc),
         ))
     return results
+
+
+class PriceSuggestion(BaseModel):
+    category: ToolCategory
+    suggested_per_day_cents: int
+    based_on: int  # nearby same-category listings used ("0" = category default)
+
+
+_CATEGORY_DEFAULT_CENTS = {
+    ToolCategory.POWER_TOOLS: 900, ToolCategory.HAND_TOOLS: 500,
+    ToolCategory.GARDEN: 700, ToolCategory.LADDERS_ACCESS: 600,
+    ToolCategory.PAINTING_DECORATING: 600, ToolCategory.PLUMBING: 700,
+    ToolCategory.AUTOMOTIVE: 900, ToolCategory.CLEANING: 1100,
+    ToolCategory.MEASURING: 500, ToolCategory.OTHER: 700,
+}
+
+
+@router.get("/price-suggestion", response_model=PriceSuggestion)
+def price_suggestion(
+    category: ToolCategory,
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    c: Container = Depends(get_container),
+):
+    """Fair-price hint from what the same category actually rents for nearby;
+    falls back to category defaults when the neighborhood is thin."""
+    prefixes = geo.cover_prefixes(lat, lng, 8.0)
+    prices = sorted(
+        l.price_per_day_cents
+        for l in c.listings.by_geohash_prefixes(prefixes)
+        if l.status == ListingStatus.ACTIVE and l.category == category
+    )
+    if len(prices) >= 3:
+        return PriceSuggestion(category=category,
+                               suggested_per_day_cents=prices[len(prices) // 2],
+                               based_on=len(prices))
+    return PriceSuggestion(category=category,
+                           suggested_per_day_cents=_CATEGORY_DEFAULT_CENTS[category],
+                           based_on=len(prices))
 
 
 @router.post("/identify", response_model=ToolIdSuggestion)
@@ -261,6 +316,32 @@ def serve_photo(name: str, c: Container = Depends(get_container)):
     data, content_type = blob
     return Response(content=data, media_type=content_type,
                     headers={"Cache-Control": "public, max-age=31536000"})
+
+
+class FavoriteResponse(BaseModel):
+    favorited: bool
+    count: int
+
+
+@router.put("/{listing_id}/favorite", response_model=FavoriteResponse)
+def toggle_favorite(
+    listing_id: str,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    from ..models import UserProfile
+
+    if not c.listings.get(listing_id):
+        raise HTTPException(status_code=404, detail="Listing not found")
+    user = c.users.get(uid) or UserProfile(uid=uid, created_at=datetime.now(timezone.utc))
+    if listing_id in user.favorites:
+        user.favorites.remove(listing_id)
+        favorited = False
+    else:
+        user.favorites = (user.favorites + [listing_id])[-100:]
+        favorited = True
+    c.users.upsert(user)
+    return FavoriteResponse(favorited=favorited, count=len(user.favorites))
 
 
 @router.patch("/{listing_id}", response_model=Listing)

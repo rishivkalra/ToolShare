@@ -145,6 +145,29 @@ def plan_project(
     )
 
 
+@router.post("/{kit_id}/guide")
+def build_guide(
+    kit_id: str,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """Step-by-step AI build guide referencing the kit's tools (cached)."""
+    kit = c.kits.get(kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+    if kit.owner_uid != uid:
+        raise HTTPException(status_code=403, detail="Not your kit")
+    if kit.guide:
+        return kit.guide
+    try:
+        guide = c.guides.build(kit.description, [i.name for i in kit.items])
+    except Exception:
+        raise HTTPException(status_code=502, detail="Guide generation failed — try again")
+    kit.guide = guide.model_dump(mode="json")
+    c.kits.create(kit)  # upsert
+    return kit.guide
+
+
 class KitCheckoutRequest(BaseModel):
     listing_ids: list[str] = Field(min_length=1, max_length=12)
     start_date: date

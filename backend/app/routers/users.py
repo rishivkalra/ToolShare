@@ -7,7 +7,10 @@ from pydantic import BaseModel
 
 from ..auth import current_uid
 from ..deps import Container, get_container
-from ..models import BookingState, UserProfile, UserUpdate
+from ..models import BookingState, Listing, UserProfile, UserUpdate
+
+# A tool's purchase price ≈ this many daily rentals (shared heuristic).
+BUY_MULTIPLE = 35
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
 
@@ -165,6 +168,53 @@ def complete_connect_onboarding(
             paid.append(booking.id)
             total += booking.price.rental_cents
     return PayoutSweepResponse(paid_bookings=paid, total_cents=total)
+
+
+class Ledger(BaseModel):
+    """The two numbers that keep both sides hooked: what borrowing saved you,
+    and what lending earned you."""
+
+    rentals_as_borrower: int
+    spent_cents: int
+    saved_vs_buying_cents: int
+    rentals_as_lender: int
+    earned_cents: int
+
+
+_LEDGER_STATES = {BookingState.RETURNED, BookingState.COMPLETED}
+
+
+@router.get("/me/ledger", response_model=Ledger)
+def my_ledger(uid: str = Depends(current_uid), c: Container = Depends(get_container)):
+    borrowed = spent = saved = lent = earned = 0
+    for b in c.bookings.for_user(uid):
+        if b.state not in _LEDGER_STATES:
+            continue
+        if b.borrower_uid == uid:
+            borrowed += 1
+            spent += b.price.total_cents
+            saved += max(0, b.price.price_per_day_cents * BUY_MULTIPLE - b.price.rental_cents)
+        if b.lender_uid == uid:
+            lent += 1
+            earned += b.price.rental_cents
+    return Ledger(
+        rentals_as_borrower=borrowed, spent_cents=spent,
+        saved_vs_buying_cents=saved,
+        rentals_as_lender=lent, earned_cents=earned,
+    )
+
+
+@router.get("/me/favorites", response_model=list[Listing])
+def my_favorites(uid: str = Depends(current_uid), c: Container = Depends(get_container)):
+    user = c.users.get(uid)
+    if not user:
+        return []
+    out = []
+    for lid in user.favorites:
+        listing = c.listings.get(lid)
+        if listing:
+            out.append(listing)
+    return out
 
 
 @router.get("/{uid}", response_model=UserProfile)

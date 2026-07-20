@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from ..auth import current_uid
@@ -84,6 +84,7 @@ def create_booking_request(
             listing.deposit_cents,
             body.start_date,
             body.end_date,
+            listing.price_per_week_cents,
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -365,7 +366,91 @@ def confirm_return(
         booking_id=booking.id,
         kind="payout",
     )
+
+    # Milestone: the moment a tool's lifetime earnings cross its rough
+    # purchase price (~35 daily rentals), tell the owner it paid for itself.
+    _EARNING = {BookingState.CONFIRMED, BookingState.PICKED_UP,
+                BookingState.RETURNED, BookingState.COMPLETED, BookingState.DISPUTED}
+    listing = c.listings.get(booking.listing_id)
+    if listing:
+        # by_listing includes this booking (PICKED_UP/COMPLETED both count).
+        total = sum(
+            b.price.rental_cents
+            for b in c.bookings.by_listing(booking.listing_id)
+            if b.state in _EARNING
+        )
+        payoff = listing.price_per_day_cents * 35
+        if total >= payoff > total - booking.price.rental_cents:
+            c.notifier.notify(
+                booking.lender_uid,
+                f"🏆 Your {listing.title} just paid for itself",
+                f"Lifetime earnings hit ${total / 100:.0f} — everything from "
+                "here is pure profit for a tool that was gathering dust.",
+                kind="system",
+            )
     return c.bookings.update(booking)
+
+
+@router.post("/{booking_id}/photos", response_model=Booking)
+async def handoff_photo(
+    booking_id: str,
+    phase: str,
+    file: UploadFile,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """Condition photos at pickup or return (either party, max 4 per phase).
+    They anchor the AI damage check and any guarantee claim."""
+    from ..services.photos import MAX_PHOTO_BYTES
+
+    if phase not in ("pickup", "return"):
+        raise HTTPException(status_code=400, detail="phase must be pickup or return")
+    booking = _get_booking_for(booking_id, uid, c)
+    if booking.state not in (BookingState.CONFIRMED, BookingState.PICKED_UP):
+        raise HTTPException(status_code=409, detail="Photos are for active rentals")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only images are accepted")
+    data = await file.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo too large (max 5MB)")
+    photos = booking.pickup_photos if phase == "pickup" else booking.return_photos
+    if len(photos) >= 4:
+        raise HTTPException(status_code=400, detail="Photo limit reached (4)")
+    photos.append(c.photos.save(data, file.content_type))
+    return c.bookings.update(booking)
+
+
+class DamageCheckResponse(BaseModel):
+    verdict: str
+    notes: str
+
+
+@router.post("/{booking_id}/damage-check", response_model=DamageCheckResponse)
+def damage_check(
+    booking_id: str,
+    uid: str = Depends(current_uid),
+    c: Container = Depends(get_container),
+):
+    """AI before/after comparison of the handoff photos — run it before
+    confirming the return or opening a dispute."""
+    booking = _get_booking_for(booking_id, uid, c)
+    if not booking.pickup_photos or not booking.return_photos:
+        raise HTTPException(
+            status_code=409,
+            detail="Need at least one pickup photo and one return photo first",
+        )
+    before = c.photos.load(booking.pickup_photos[-1])
+    after = c.photos.load(booking.return_photos[-1])
+    if not before or not after:
+        raise HTTPException(status_code=502, detail="Couldn't load the photos")
+    try:
+        result = c.damage.compare(before[0], before[1], after[0], after[1])
+    except Exception:
+        raise HTTPException(status_code=502, detail="Condition check failed — try again")
+    booking.damage_verdict = result.verdict
+    booking.damage_notes = result.notes
+    c.bookings.update(booking)
+    return DamageCheckResponse(verdict=result.verdict, notes=result.notes)
 
 
 class DisputeBody(BaseModel):

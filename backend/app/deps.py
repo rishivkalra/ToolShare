@@ -13,10 +13,13 @@ from .repos.base import (
     PushSubRepo,
     ReportRepo,
     ReviewRepo,
+    SavedSearchRepo,
     UserRepo,
     WantedRepo,
 )
+from .services.damage import DamageChecker, build_damage_checker
 from .services.google_auth import GoogleVerifier, build_verifier
+from .services.guides import GuideBuilder, build_guide_builder
 from .services.identity import FakeIdentity, IdentityProvider, StripeIdentity
 from .services.notify import Notifier
 from .services.tool_id import ToolIdentifier, build_identifier
@@ -46,6 +49,9 @@ class Container:
     kits: KitRepo
     wanted: WantedRepo
     tool_id: ToolIdentifier
+    saved_searches: SavedSearchRepo
+    guides: GuideBuilder
+    damage: DamageChecker
 
 
 _container: Container | None = None
@@ -64,6 +70,7 @@ def build_container(settings: Settings) -> Container:
             FirestorePushSubRepo,
             FirestoreReportRepo,
             FirestoreReviewRepo,
+            FirestoreSavedSearchRepo,
             FirestoreUserRepo,
             FirestoreWantedRepo,
         )
@@ -115,6 +122,11 @@ def build_container(settings: Settings) -> Container:
             wanted=FirestoreWantedRepo(db),
             tool_id=build_identifier(settings.planner, settings.gcp_project,
                                      settings.gemini_model),
+            saved_searches=FirestoreSavedSearchRepo(db),
+            guides=build_guide_builder(settings.planner, settings.gcp_project,
+                                       settings.gemini_model),
+            damage=build_damage_checker(settings.planner, settings.gcp_project,
+                                        settings.gemini_model),
         )
 
     from .repos.memory import (
@@ -126,6 +138,7 @@ def build_container(settings: Settings) -> Container:
         MemoryPushSubRepo,
         MemoryReportRepo,
         MemoryReviewRepo,
+        MemorySavedSearchRepo,
         MemoryUserRepo,
         MemoryWantedRepo,
     )
@@ -153,6 +166,11 @@ def build_container(settings: Settings) -> Container:
         wanted=MemoryWantedRepo(),
         tool_id=build_identifier(settings.planner, settings.gcp_project,
                                  settings.gemini_model),
+        saved_searches=MemorySavedSearchRepo(),
+        guides=build_guide_builder(settings.planner, settings.gcp_project,
+                                   settings.gemini_model),
+        damage=build_damage_checker(settings.planner, settings.gcp_project,
+                                    settings.gemini_model),
     )
 
 

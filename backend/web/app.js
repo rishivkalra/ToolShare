@@ -178,13 +178,30 @@ function renderBrowse() {
   $("#map").hidden = !mapMode;
   grid.hidden = mapMode;
   if (mapMode) { renderMap(results); return; }
+  const q = $("#search-input").value.trim();
   if (!results.length) {
-    grid.innerHTML = `<div class="empty"><span class="big">🌱</span>No tools here yet.<br>Be the first — list one from the <b>List</b> tab.</div>`;
+    grid.innerHTML = `<div class="empty"><span class="big">🌱</span>No tools here yet.<br>
+      ${q ? `<button class="btn btn-primary" id="alert-me" style="margin-top:12px">🔔 Alert me when a neighbor lists “${esc(q)}”</button>`
+          : `Be the first — list one from the <b>List</b> tab.`}</div>`;
+    const ab = $("#alert-me");
+    if (ab) ab.onclick = async () => {
+      try {
+        await api("POST", "/v1/searches", { term: q, lat: store.loc.lat, lng: store.loc.lng });
+        toast("You'll get a notification the moment one is listed nearby 🔔");
+        ab.disabled = true;
+      } catch (e) { toast(e.message, true); }
+    };
     return;
   }
   grid.innerHTML = results.map(toolCard).join("");
   grid.querySelectorAll(".toolcard").forEach((el) => {
-    el.onclick = () => openListing(el.dataset.id);
+    el.onclick = (ev) => {
+      if (ev.target.closest("[data-fav]")) return;
+      openListing(el.dataset.id);
+    };
+  });
+  grid.querySelectorAll("[data-fav]").forEach((btn) => {
+    btn.onclick = () => toggleFav(btn.dataset.fav, btn);
   });
 }
 
@@ -279,18 +296,37 @@ function photoHtml(l, cls = "") {
     : `<span class="ph ${cls}">${CATEGORIES[l.category] || "🧰"}</span>`;
 }
 
+function isFav(id) {
+  return !!(store.me && store.me.favorites && store.me.favorites.includes(id));
+}
+
+async function toggleFav(id, btn) {
+  try {
+    const r = await api("PUT", `/v1/listings/${id}/favorite`);
+    if (store.me) {
+      store.me.favorites = store.me.favorites || [];
+      if (r.favorited) store.me.favorites.push(id);
+      else store.me.favorites = store.me.favorites.filter((x) => x !== id);
+    }
+    btn.textContent = r.favorited ? "❤️" : "🤍";
+    toast(r.favorited ? "Saved to your favorites ❤️" : "Removed from favorites");
+  } catch (e) { toast(e.message, true); }
+}
+
 function toolCard(r) {
   const l = r.listing;
   const rating = l.rating_count > 0 ? `<span class="chip">★ ${l.rating_avg}</span>` : "";
   const deposit = l.deposit_cents > 0 ? `<span class="chip">🛡 ${dollars(l.deposit_cents)} deposit</span>` : "";
+  const instant = l.instant_book ? `<span class="chip warn">⚡ instant</span>` : "";
   return `<article class="toolcard" data-id="${esc(l.id)}">
     <div class="toolphoto">${photoHtml(l)}
       <span class="pricepill">${dollars(l.price_per_day_cents)}<small>/day</small></span>
+      <button class="favbtn" data-fav="${esc(l.id)}" title="Save">${isFav(l.id) ? "❤️" : "🤍"}</button>
     </div>
     <div class="body">
       <h3>${esc(l.title)}</h3>
       <div class="meta">
-        <span class="chip ok">📍 ${r.distance_km.toFixed(1)} km</span>${rating}${deposit}
+        <span class="chip ok">📍 ${r.distance_km.toFixed(1)} km</span>${rating}${deposit}${instant}
       </div>
     </div>
   </article>`;
@@ -381,9 +417,17 @@ async function openListing(id) {
     }
     const end = sel.end || sel.start;
     const days = daysBetween(sel.start, end);
-    const rental = l.price_per_day_cents * days;
+    let rental = l.price_per_day_cents * days;
+    let weeklyNote = "";
+    if (l.price_per_week_cents > 0 && days >= 7) {
+      const tiered = Math.floor(days / 7) * l.price_per_week_cents + (days % 7) * l.price_per_day_cents;
+      if (tiered < rental) {
+        weeklyNote = ` <span class="chip ok">weekly rate — save ${dollars(rental - tiered)}</span>`;
+        rental = tiered;
+      }
+    }
     box.innerHTML =
-      `<b>${esc(sel.start)} → ${esc(end)}</b> · ${days} day${days > 1 ? "s" : ""}<br>` +
+      `<b>${esc(sel.start)} → ${esc(end)}</b> · ${days} day${days > 1 ? "s" : ""}${weeklyNote}<br>` +
       `${dollars(rental)} rental + ${dollars(fee(rental))} service fee + ${dollars(PROTECTION_FEE_CENTS)} protection` +
       (l.deposit_cents ? `<br>+ ${dollars(l.deposit_cents)} refundable deposit hold (released on safe return)` : "") +
       `<div class="grand">Total ${dollars(rental + fee(rental) + PROTECTION_FEE_CENTS)}</div>
@@ -509,7 +553,8 @@ function renderKit(kit) {
       </div>` : ""}
     ${kit.kit_id ? `<div class="sharekit">
         <button class="btn" id="kit-share">🔗 Share this kit</button>
-        <span class="opt">public page — friends see the plan, owners see the demand</span>
+        <button class="btn" id="kit-guide">📖 Step-by-step build guide</button>
+        <span class="opt">the guide references the exact tools in your kit</span>
       </div>` : ""}
     <div class="kit-notes">
       ${kit.missing_tools.length ? `⏳ Not nearby yet: <b>${kit.missing_tools.map(esc).join(", ")}</b>. We'll notify you when a neighbor lists one.<br>` : ""}
@@ -519,6 +564,15 @@ function renderKit(kit) {
   document.querySelectorAll(".kititem[data-listing]").forEach((el) => {
     el.onclick = () => openListing(el.dataset.listing);
   });
+  const gbtn = $("#kit-guide");
+  if (gbtn) gbtn.onclick = async () => {
+    gbtn.disabled = true; gbtn.textContent = "📖 Writing your guide…";
+    try {
+      const g = await api("POST", `/v1/projects/${kit.kit_id}/guide`);
+      showGuide(g);
+    } catch (e) { toast(e.message, true); }
+    finally { gbtn.disabled = false; gbtn.textContent = "📖 Step-by-step build guide"; }
+  };
   const share = $("#kit-share");
   if (share) share.onclick = async () => {
     const url = location.origin + kit.share_path;
@@ -547,6 +601,29 @@ function renderKit(kit) {
   };
 }
 
+function showGuide(g) {
+  const steps = g.steps.map((s, i) => `
+    <div class="gstep">
+      <div class="gnum">${i + 1}</div>
+      <div>
+        <div class="gtitle">${esc(s.title)}
+          ${(s.tools || []).map((t) => `<span class="chip ok">🧰 ${esc(t)}</span>`).join(" ")}</div>
+        <div class="gdetail">${esc(s.detail)}</div>
+        ${s.safety ? `<div class="gsafety">⚠️ ${esc(s.safety)}</div>` : ""}
+      </div>
+    </div>`).join("");
+  modal(`
+    <div class="inner">
+      <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+      <span class="kicker">📖 Your build guide</span>
+      <h2>${esc(g.title)}</h2>
+      <p style="color:var(--muted);margin:6px 0 12px">
+        ${esc(g.difficulty)} · ~${g.est_hours}h with the tools in your kit</p>
+      <div class="guide">${steps}</div>
+      ${g.finish_note ? `<p class="protectline" style="margin-top:14px">🎉 ${esc(g.finish_note)}</p>` : ""}
+    </div>`);
+}
+
 /* ---------------- list a tool (with photo) ---------------- */
 
 function bindPhotoPicker() {
@@ -564,6 +641,18 @@ function bindPhotoPicker() {
   };
 }
 
+async function priceHint() {
+  const hint = $("#price-hint");
+  try {
+    const cat = $("#category-select").value;
+    const s = await api("GET",
+      `/v1/listings/price-suggestion?category=${cat}&lat=${store.loc.lat}&lng=${store.loc.lng}`);
+    hint.textContent = s.based_on >= 3
+      ? `💡 ${s.based_on} similar tools nearby go for ~${dollars(s.suggested_per_day_cents)}/day`
+      : `💡 Suggested for this category: ~${dollars(s.suggested_per_day_cents)}/day`;
+  } catch { hint.textContent = ""; }
+}
+
 async function identifyTool(blob) {
   // Photo-to-listing: Gemini names the tool and drafts the whole form.
   try {
@@ -575,6 +664,7 @@ async function identifyTool(blob) {
     f.price.value = (s.price_per_day_cents / 100).toFixed(0);
     f.deposit.value = (s.deposit_cents / 100).toFixed(0);
     $("#photopick-label").textContent = "Looks great — tap to change";
+    priceHint();
     toast(s.confidence >= 0.5
       ? `✨ Recognized: ${s.title} — check the details and hit list!`
       : "✨ Best guess filled in — please double-check the details", false);
@@ -614,6 +704,7 @@ async function submitListing(ev) {
       lat: store.loc.lat, lng: store.loc.lng,
       exact_address: f.address.value.trim(),
       instant_book: $("#instant-check").checked,
+      price_per_week_cents: Math.round(parseFloat(f.weekprice.value || "0") * 100),
     });
     if (store.photoBlob) {
       btn.textContent = "Uploading photo…";
@@ -719,9 +810,31 @@ async function renderBookingDetail(id) {
     if (b.state === "picked_up" && isLender) act("📦 Tool returned — all good", "return");
     if (b.state === "completed") acts.push(`<button class="btn" data-act="review">⭐ Leave a 5★ review</button>`);
 
+    // Condition documentation: photos at each handoff + the AI comparison.
+    let condition = "";
+    if (["confirmed", "picked_up"].includes(b.state)) {
+      const phase = b.state === "confirmed" ? "pickup" : "return";
+      const counts = `📸 ${b.pickup_photos.length} pickup · ${b.return_photos.length} return photo${b.return_photos.length === 1 ? "" : "s"}`;
+      const verdict = b.damage_verdict
+        ? `<span class="chip ${b.damage_verdict === "ok" ? "ok" : b.damage_verdict === "damage_suspected" ? "bad" : "warn"}">
+             AI check: ${esc(b.damage_verdict.replace(/_/g, " "))}</span>
+           <div class="opt" style="margin-top:4px">${esc(b.damage_notes)}</div>`
+        : "";
+      condition = `<div class="conditionbox">
+        <div class="opt" style="font-weight:700">${counts} — photos protect both of you under the Guarantee</div>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn" data-photo="${phase}">📸 Add ${phase} photo</button>
+          ${isLender && b.pickup_photos.length && b.return_photos.length
+            ? `<button class="btn" data-act="damage-check">🔍 AI condition check</button>` : ""}
+        </div>
+        ${verdict}
+      </div>`;
+    }
+
     box.innerHTML = `
       ${b.exact_address ? `<div class="address">📍 Pickup: ${esc(b.exact_address)}</div>` : ""}
       <div class="actions">${acts.join("")}</div>
+      ${condition}
       <div class="chat">
         <div class="msgs">${msgs.map((m) =>
           `<div class="msg ${m.sender_uid === store.uid ? "mine" : "theirs"}">${esc(m.text)}</div>`).join("") || '<span class="opt">Say hi and arrange the handoff 👋</span>'}</div>
@@ -733,6 +846,23 @@ async function renderBookingDetail(id) {
       <button class="report-link" onclick="reportTarget('booking','${esc(id)}')">Report a problem with this rental</button>`;
     box.querySelectorAll("[data-act]").forEach((btn) => {
       btn.onclick = () => bookingAction(id, btn.dataset.act);
+    });
+    box.querySelectorAll("[data-photo]").forEach((btn) => {
+      btn.onclick = () => {
+        const input = document.createElement("input");
+        input.type = "file"; input.accept = "image/*"; input.capture = "environment";
+        input.onchange = async () => {
+          const file = input.files && input.files[0];
+          if (!file) return;
+          try {
+            const blob = await downscale(file, 1280, 0.85);
+            await apiUpload(`/v1/bookings/${id}/photos?phase=${btn.dataset.photo}`, blob, "handoff.jpg");
+            toast("Condition photo saved 📸");
+            renderBookingDetail(id);
+          } catch (e) { toast(e.message, true); }
+        };
+        input.click();
+      };
     });
     $(`#chat-input-${CSS.escape(id)}`).addEventListener("keydown", (e) => {
       if (e.key === "Enter") bookingAction(id, "send");
@@ -778,6 +908,13 @@ async function bookingAction(id, action) {
       const b = await api("GET", `/v1/bookings/${id}`);
       if (!confirm(refundMath(b, b.lender_uid === store.uid))) return;
     }
+    if (action === "damage-check") {
+      const r = await api("POST", `/v1/bookings/${id}/damage-check`);
+      toast(r.verdict === "ok" ? "✅ AI check: no new damage visible"
+        : r.verdict === "damage_suspected" ? "⚠️ AI check: possible damage — review the photos"
+        : "🤔 AI check inconclusive — compare the photos yourself");
+      return renderBookingDetail(id);
+    }
     await api("POST", `/v1/bookings/${id}/${action}`);
     if (action === "cancel") toast("Cancelled — refunds per policy are on their way.");
     if (action === "approve") toast("Approved — borrower charged, deposit held. 💳");
@@ -813,12 +950,46 @@ async function loadProfile() {
     store.me = p;
     renderCard(p, name);
     renderLadder(p);
+    loadLedger();
+    loadFavorites();
     $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
     $("#credit-chip").innerHTML = p.credit_cents > 0
       ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
       : `<span class="opt">No credit yet — every accepted invite is worth $10.</span>`;
     loadMyTools();
   } catch (e) { toast(e.message, true); }
+}
+
+async function loadLedger() {
+  try {
+    const l = await api("GET", "/v1/users/me/ledger");
+    $("#ledger-tiles").innerHTML = `
+      <div class="stat-tile"><div class="num">${dollars(l.saved_vs_buying_cents)}</div><div class="lbl">Saved vs buying</div></div>
+      <div class="stat-tile"><div class="num">${l.rentals_as_borrower}</div><div class="lbl">Tools borrowed</div></div>
+      <div class="stat-tile"><div class="num">${dollars(l.earned_cents)}</div><div class="lbl">Earned lending</div></div>
+      <div class="stat-tile"><div class="num">${l.rentals_as_lender}</div><div class="lbl">Tools lent</div></div>`;
+  } catch { $("#ledger-tiles").innerHTML = ""; }
+}
+
+async function loadFavorites() {
+  const box = $("#fav-list");
+  try {
+    const favs = await api("GET", "/v1/users/me/favorites");
+    $("#fav-count").textContent = `${favs.length} saved`;
+    if (!favs.length) {
+      box.innerHTML = `<p class="opt">Tap 🤍 on any tool to save it for later.</p>`;
+      return;
+    }
+    box.innerHTML = favs.map((l) => `
+      <div class="mytool" data-open="${esc(l.id)}" style="cursor:pointer">
+        <div class="row1"><span>${CATEGORIES[l.category] || "🧰"}</span>
+          <span class="t">${esc(l.title)}</span>
+          <span class="chip ok">${dollars(l.price_per_day_cents)}/day</span></div>
+      </div>`).join("");
+    box.querySelectorAll("[data-open]").forEach((el) => {
+      el.onclick = () => openListing(el.dataset.open);
+    });
+  } catch { box.innerHTML = ""; }
 }
 
 function renderLadder(p) {
@@ -1101,6 +1272,7 @@ function boot() {
   $("#search-input").addEventListener("keydown", (e) => { if (e.key === "Enter") loadBrowse(); });
   $("#plan-btn").onclick = planProject;
   $("#list-form").addEventListener("submit", submitListing);
+  $("#category-select").addEventListener("change", priceHint);
   bindPhotoPicker();
   $("#uid-btn").onclick = switchUser;
   $("#uid-input").addEventListener("keydown", (e) => { if (e.key === "Enter") switchUser(); });

@@ -72,6 +72,7 @@ class UserProfile(BaseModel):
     credit_cents: int = 0
     referred_by: str = ""
     referral_paid: bool = False
+    favorites: list[str] = Field(default_factory=list)  # listing ids, capped
     rating_avg: float = 0.0
     rating_count: int = 0
     created_at: Optional[datetime] = None
@@ -94,6 +95,9 @@ class ListingCreate(BaseModel):
     condition: str = Field(default="good", max_length=40)
     photos: list[str] = Field(default_factory=list, max_length=8)
     price_per_day_cents: int = Field(ge=500, le=50_000)
+    # Optional weekly rate: rentals of 7+ days price as weeks + leftover days,
+    # never more than the plain daily total.
+    price_per_week_cents: int = Field(default=0, ge=0, le=300_000)
     deposit_cents: int = Field(default=0, ge=0, le=200_000)
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
@@ -112,6 +116,7 @@ class ListingUpdate(BaseModel):
     condition: Optional[str] = None
     photos: Optional[list[str]] = None
     price_per_day_cents: Optional[int] = Field(default=None, ge=500, le=50_000)
+    price_per_week_cents: Optional[int] = Field(default=None, ge=0, le=300_000)
     deposit_cents: Optional[int] = Field(default=None, ge=0, le=200_000)
     status: Optional[ListingStatus] = None
     blackout_dates: Optional[list[date]] = Field(default=None, max_length=180)
@@ -127,6 +132,7 @@ class Listing(BaseModel):
     condition: str = "good"
     photos: list[str] = Field(default_factory=list)
     price_per_day_cents: int
+    price_per_week_cents: int = 0
     deposit_cents: int = 0
     geohash: str = ""
     # Jittered coordinates safe for public display; exact address is only
@@ -203,6 +209,12 @@ class Booking(BaseModel):
     credit_applied_cents: int = 0  # referral credit consumed by this booking
     borrower_marked_pickup: bool = False
     lender_marked_pickup: bool = False
+    # Condition documentation: photos at handoff and return, plus the AI
+    # before/after comparison — makes guarantee claims adjudicable.
+    pickup_photos: list[str] = Field(default_factory=list)
+    return_photos: list[str] = Field(default_factory=list)
+    damage_verdict: str = ""  # "" | ok | damage_suspected | inconclusive
+    damage_notes: str = ""
     exact_address: str = ""  # populated only for participants once CONFIRMED
     timeline: list[TimelineEvent] = Field(default_factory=list)
     created_at: Optional[datetime] = None
@@ -262,6 +274,17 @@ class Kit(BaseModel):
     total_per_day_cents: int = 0
     buy_estimate_cents: int = 0  # what buying all this would roughly cost
     geohash: str = ""  # 5-char neighborhood prefix
+    guide: Optional[dict] = None  # cached AI build guide (services.guides)
+    created_at: Optional[datetime] = None
+
+
+class SavedSearch(BaseModel):
+    """A borrower's standing alert: notify me when this gets listed nearby."""
+
+    id: str
+    uid: str
+    term: str
+    geohash: str  # 5-char neighborhood prefix
     created_at: Optional[datetime] = None
 
 

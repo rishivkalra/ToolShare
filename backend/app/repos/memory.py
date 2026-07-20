@@ -15,6 +15,7 @@ from ..models import (
     PushSubscription,
     Report,
     Review,
+    SavedSearch,
     TERMINAL_STATES,
     UserProfile,
     WantedSignal,
@@ -195,6 +196,28 @@ class MemoryWantedRepo:
             s for s in self.signals
             if s.created_at and s.created_at.isoformat() >= cutoff_iso
         ]
+
+
+class MemorySavedSearchRepo:
+    def __init__(self):
+        self.searches: dict[str, SavedSearch] = {}
+
+    def create(self, search: SavedSearch) -> SavedSearch:
+        self.searches[search.id] = search
+        return search
+
+    def for_geohash(self, geohash: str) -> list[SavedSearch]:
+        return [s for s in self.searches.values() if s.geohash == geohash]
+
+    def for_user(self, uid: str) -> list[SavedSearch]:
+        return [s for s in self.searches.values() if s.uid == uid]
+
+    def delete(self, search_id: str, uid: str) -> bool:
+        s = self.searches.get(search_id)
+        if s and s.uid == uid:
+            del self.searches[search_id]
+            return True
+        return False
 
 
 class MemoryPushSubRepo:
