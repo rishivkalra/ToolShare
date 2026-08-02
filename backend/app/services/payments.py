@@ -67,6 +67,7 @@ class FakePayments:
         self.refunds: list[tuple[str, Optional[int]]] = []
         self.payouts: list[tuple[str, int]] = []
         self.fail_next_charge = False
+        self.fail_next_deposit = False
 
     def ensure_customer(self, uid: str, existing_customer_id: str) -> str:
         return existing_customer_id or f"cus_fake_{uid}"
@@ -91,6 +92,9 @@ class FakePayments:
         return PaymentResult(id=pid, status="succeeded")
 
     def hold_deposit(self, customer_id, amount_cents, booking_id) -> PaymentResult:
+        if self.fail_next_deposit:
+            self.fail_next_deposit = False
+            raise RuntimeError("card declined the deposit hold")
         pid = f"pi_dep_fake_{next(self._n)}"
         self.deposits.append((pid, amount_cents))
         return PaymentResult(id=pid, status="requires_capture")

@@ -34,6 +34,9 @@ _ALLOWED: dict[Role, set[tuple[BookingState, BookingState]]] = {
     },
     "system": {
         (BookingState.REQUESTED, BookingState.EXPIRED),
+        # APPROVED whose payment never completed: expired by the same 24h
+        # task so a failed charge can't block the calendar forever.
+        (BookingState.APPROVED, BookingState.EXPIRED),
         (BookingState.APPROVED, BookingState.CONFIRMED),
         (BookingState.RETURNED, BookingState.COMPLETED),
         (BookingState.DISPUTED, BookingState.COMPLETED),

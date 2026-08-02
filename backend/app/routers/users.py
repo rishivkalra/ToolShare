@@ -220,8 +220,19 @@ def my_favorites(uid: str = Depends(current_uid), c: Container = Depends(get_con
 @router.get("/{uid}", response_model=UserProfile)
 def public_profile(uid: str, c: Container = Depends(get_container)):
     user = c.users.get(uid) or UserProfile(uid=uid)
-    # Strip payment identifiers and contact info from public view.
-    user.stripe_customer_id = ""
-    user.stripe_connect_id = ""
-    user.email = ""
-    return user
+    # Whitelist, don't blacklist: rebuild the payload from only the fields a
+    # stranger should see (trust badges + reputation). Everything else —
+    # email, card digits, credit balance, referral graph, favorites, Stripe
+    # ids — stays private by omission.
+    return UserProfile(
+        uid=user.uid,
+        display_name=user.display_name,
+        photo_url=user.photo_url,
+        bio=user.bio,
+        phone_verified=user.phone_verified,
+        id_verified=user.id_verified,
+        card_on_file=user.card_on_file,  # badge only; last4 never leaves
+        rating_avg=user.rating_avg,
+        rating_count=user.rating_count,
+        created_at=user.created_at,
+    )

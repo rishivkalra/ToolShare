@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
@@ -108,12 +108,20 @@ def search(
             r.rented_until = max(active)
     if needle and not results and len(needle) >= 3:
         # Unmet demand is a supply signal: nearby owners get a weekly
-        # "wanted near you" digest built from these.
-        c.wanted.create(WantedSignal(
-            id=next_id("wnt"), geohash=geo.encode(lat, lng)[:5],
-            term=needle[:60], source="search",
-            created_at=datetime.now(timezone.utc),
-        ))
+        # "wanted near you" digest built from these. Dedupe per term per
+        # neighborhood per day so repeated (or scripted) searches can't
+        # inflate the digest.
+        gh5 = geo.encode(lat, lng)[:5]
+        term = needle[:60]
+        day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        already = any(
+            s.term == term and s.geohash == gh5 for s in c.wanted.since(day_ago)
+        )
+        if not already:
+            c.wanted.create(WantedSignal(
+                id=next_id("wnt"), geohash=gh5, term=term, source="search",
+                created_at=datetime.now(timezone.utc),
+            ))
     return results
 
 

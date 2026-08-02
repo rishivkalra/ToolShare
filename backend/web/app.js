@@ -358,7 +358,8 @@ function checklistItems() {
 function renderChecklist() {
   const box = $("#checklist-box");
   if (!box) return;
-  if (localStorage.getItem("ts_checklist_done")) { box.innerHTML = ""; return; }
+  // No profile (signed-out visitor in prod) -> nothing actionable to show.
+  if (!store.me || localStorage.getItem("ts_checklist_done")) { box.innerHTML = ""; return; }
   const items = checklistItems();
   const done = items.filter((i) => i.done).length;
   if (done === items.length) { box.innerHTML = ""; return; }
@@ -1664,7 +1665,7 @@ function boot() {
 async function pollChat() {
   // Live-ish chat: refresh only the message list of the open booking so a
   // draft being typed is never clobbered.
-  if (!openBooking || !location.hash.includes("rentals")) return;
+  if (document.hidden || !openBooking || !location.hash.includes("rentals")) return;
   const box = document.querySelector(`#detail-${CSS.escape(openBooking)} .msgs`);
   if (!box) return;
   try {

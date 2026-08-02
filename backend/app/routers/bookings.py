@@ -193,7 +193,16 @@ def charge_and_confirm(c: Container, booking: Booking) -> Booking:
         c.users.upsert(borrower)
 
     if booking.price.deposit_cents > 0:
-        deposit = c.payments.hold_deposit(customer_id, booking.price.deposit_cents, booking.id)
+        try:
+            deposit = c.payments.hold_deposit(customer_id, booking.price.deposit_cents, booking.id)
+        except Exception:
+            # Never keep money without a confirmed booking: unwind the charge,
+            # persist the APPROVED state, surface a retryable failure.
+            if booking.stripe_payment_intent:
+                c.payments.refund_rental(booking.stripe_payment_intent, None)
+                booking.stripe_payment_intent = ""
+            c.bookings.update(booking)
+            raise HTTPException(status_code=402, detail="Deposit hold failed; borrower must update payment method")
         booking.stripe_deposit_intent = deposit.id
 
     _transition_or_409(booking, BookingState.CONFIRMED, "system", "payment captured")
@@ -236,6 +245,18 @@ def approve(
     c: Container = Depends(get_container),
 ):
     booking = _get_booking_for(booking_id, uid, c)
+    # Re-check overlap at approval time: two requests for the same dates can
+    # both sit REQUESTED, but only one may be approved and charged.
+    conflicts = [
+        b for b in c.bookings.overlapping(
+            booking.listing_id, booking.start_date, booking.end_date)
+        if b.id != booking.id
+    ]
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail="Another booking already covers those dates — decline this one",
+        )
     _transition_or_409(booking, BookingState.APPROVED, uid)
     return charge_and_confirm(c, booking)
 
@@ -272,15 +293,33 @@ def cancel(
     )
     _transition_or_409(booking, to_state, uid)
 
-    if was_paid and booking.stripe_payment_intent:
+    if was_paid:
+        # Refund math must respect referral credit: cash refunds can never
+        # exceed what was actually charged (total - credit), and the credit
+        # portion comes back as credit, not cash.
+        credit_used = booking.credit_applied_cents
+        cash_charged = booking.price.total_cents - credit_used
         if to_state == BookingState.CANCELLED_BY_LENDER:
-            # Lender cancelled: borrower gets everything back including fee.
-            c.payments.refund_rental(booking.stripe_payment_intent, None)
+            # Lender cancelled: borrower is made completely whole.
+            cash_refund = cash_charged
+            credit_back = credit_used
         else:
-            # Borrower cancelled after paying: rental refunded, service fee kept.
+            # Borrower cancelled: rental comes back, fees are kept. Credit is
+            # treated as having paid the rental first.
+            rental_credit = min(credit_used, booking.price.rental_cents)
+            cash_refund = min(booking.price.rental_cents - rental_credit, cash_charged)
+            credit_back = rental_credit
+        if cash_refund > 0 and booking.stripe_payment_intent:
             c.payments.refund_rental(
-                booking.stripe_payment_intent, booking.price.rental_cents
+                booking.stripe_payment_intent,
+                None if cash_refund == cash_charged else cash_refund,
             )
+        if credit_back > 0:
+            borrower = c.users.get(booking.borrower_uid)
+            if borrower:
+                borrower.credit_cents += credit_back
+                c.users.upsert(borrower)
+            booking.credit_applied_cents -= credit_back
     if was_paid and booking.stripe_deposit_intent:
         c.payments.void_deposit(booking.stripe_deposit_intent)
     other = (
