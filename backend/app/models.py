@@ -152,6 +152,8 @@ class Listing(BaseModel):
 class ListingSearchResult(BaseModel):
     listing: Listing
     distance_km: float
+    # Set when the tool is out on a rental right now — "back Aug 12".
+    rented_until: Optional[date] = None
 
 
 # ---------------------------------------------------------------------------

@@ -96,6 +96,16 @@ def search(
         if dist <= radius_km:
             results.append(ListingSearchResult(listing=l, distance_km=round(dist, 2)))
     results.sort(key=lambda r: r.distance_km)
+    # Live availability on cards: is the tool out on a rental *today*?
+    today = datetime.now(timezone.utc).date()
+    for r in results[:60]:
+        active = [
+            b.end_date
+            for b in c.bookings.by_listing(r.listing.id)
+            if b.state in _BLOCKING_STATES and b.start_date <= today <= b.end_date
+        ]
+        if active:
+            r.rented_until = max(active)
     if needle and not results and len(needle) >= 3:
         # Unmet demand is a supply signal: nearby owners get a weekly
         # "wanted near you" digest built from these.

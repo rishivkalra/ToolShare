@@ -26,9 +26,10 @@ const store = {
   get token() { return localStorage.getItem("ts_token") || ""; },
   loc: { ...DEMO_LOC, usingDemo: true },
   profiles: {},   // uid -> public profile cache
-  photoBlob: null, // pending listing photo
+  photoBlobs: [], // pending listing photos (≤4)
   view: "list",   // browse presentation: list | map
   lastResults: [], // cached search results shared by list + map
+  filters: { category: "", availNow: false, sort: "distance" },
 };
 
 const PROTECTION_FEE_CENTS = 150;  // mirrors server; server-computed price is authoritative
@@ -93,6 +94,78 @@ function toast(msg, isErr = false) {
   el.textContent = msg;
   $("#toast-root").appendChild(el);
   setTimeout(() => el.remove(), 4200);
+}
+
+/* ---------------- in-app sign-in ---------------- */
+
+async function authConfig() {
+  if (!store.authCfg) {
+    store.authCfg = await api("GET", "/v1/auth/config")
+      .catch(() => ({ google_client_id: "", dev_auth: true }));
+  }
+  return store.authCfg;
+}
+
+async function openSignIn() {
+  const cfg = await authConfig();
+  modal(`
+    <div class="inner" style="text-align:center;padding-top:34px">
+      <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+      <span class="kicker">🏡 Join your neighborhood</span>
+      <h2>Sign in to ToolShare</h2>
+      <p style="color:var(--muted);margin:8px 0 20px">One account for renting, lending,
+        your trust badges and your $10 invites.</p>
+      <div id="gsi-app" style="display:flex;justify-content:center;min-height:44px"></div>
+      ${cfg.dev_auth ? `
+        <div style="margin-top:18px">
+          <button class="btn" id="demo-continue">Continue with a demo account</button>
+          <p class="fineprint">Staging only — demo identities disappear at launch.</p>
+        </div>` : ""}
+    </div>`);
+  if (cfg.google_client_id) {
+    const mount = () => {
+      google.accounts.id.initialize({
+        client_id: cfg.google_client_id,
+        callback: async (resp) => {
+          try {
+            const d = await api("POST", "/v1/auth/google", {
+              credential: resp.credential,
+              ref: localStorage.getItem("ts_ref") || "",
+            });
+            localStorage.setItem("ts_token", d.token);
+            localStorage.setItem("ts_uid", d.uid);
+            location.reload();
+          } catch (e) { toast(e.message, true); }
+        },
+      });
+      google.accounts.id.renderButton($("#gsi-app"),
+        { theme: "outline", size: "large", shape: "pill", text: "continue_with" });
+    };
+    if (window.google && google.accounts) mount();
+    else {
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client"; s.async = true;
+      s.onload = mount;
+      document.head.appendChild(s);
+    }
+  } else if (cfg.dev_auth) {
+    $("#gsi-app").innerHTML = `<span class="opt">Google sign-in goes live once the OAuth client is configured.</span>`;
+  }
+  const demo = $("#demo-continue");
+  if (demo) demo.onclick = () => {
+    localStorage.removeItem("ts_token");
+    localStorage.setItem("ts_uid", "demo");
+    location.reload();
+  };
+}
+
+function renderWhoami() {
+  const me = store.me || {};
+  const name = store.token ? (me.display_name || "Neighbor") : (me.display_name || "Guest");
+  $("#whoami-name").textContent = name;
+  $("#whoami-dot").innerHTML = me.photo_url
+    ? `<img src="${esc(me.photo_url)}" alt="" referrerpolicy="no-referrer">`
+    : esc(initial(name));
 }
 
 function handleCardRequired(e) {
@@ -162,16 +235,41 @@ async function loadBrowse() {
     const q = $("#search-input").value.trim();
     const params = new URLSearchParams({ lat: store.loc.lat, lng: store.loc.lng, radius_km: 8 });
     if (q) params.set("q", q);
+    if (store.filters.category) params.set("category", store.filters.category);
     store.lastResults = await api("GET", `/v1/listings/search?${params}`);
+    renderFilterbar();
     renderBrowse();
   } catch (e) {
     grid.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`;
   }
 }
 
+function renderFilterbar() {
+  const bar = $("#filterbar");
+  const f = store.filters;
+  bar.innerHTML = `
+    <button class="fchip ${!f.category ? "on" : ""}" data-cat="">All</button>
+    ${Object.keys(CATEGORIES).map((c) =>
+      `<button class="fchip ${f.category === c ? "on" : ""}" data-cat="${c}">${CATEGORIES[c]} ${c.replace(/_/g, " ")}</button>`).join("")}
+    <button class="fchip ${f.availNow ? "on" : ""}" id="f-avail">✅ Available now</button>
+    <select id="f-sort" class="fsort">
+      <option value="distance" ${f.sort === "distance" ? "selected" : ""}>Nearest first</option>
+      <option value="price" ${f.sort === "price" ? "selected" : ""}>Cheapest first</option>
+    </select>`;
+  bar.querySelectorAll("[data-cat]").forEach((b) => {
+    b.onclick = () => { f.category = b.dataset.cat; loadBrowse(); };
+  });
+  $("#f-avail").onclick = () => { f.availNow = !f.availNow; renderFilterbar(); renderBrowse(); };
+  $("#f-sort").onchange = (e) => { f.sort = e.target.value; renderBrowse(); };
+}
+
 function renderBrowse() {
   const grid = $("#browse-results");
-  const results = store.lastResults;
+  let results = store.lastResults;
+  if (store.filters.availNow) results = results.filter((r) => !r.rented_until);
+  if (store.filters.sort === "price") {
+    results = [...results].sort((a, b) => a.listing.price_per_day_cents - b.listing.price_per_day_cents);
+  }
   const mapMode = store.view === "map";
   $("#view-list").classList.toggle("active", !mapMode);
   $("#view-map").classList.toggle("active", mapMode);
@@ -203,6 +301,78 @@ function renderBrowse() {
   grid.querySelectorAll("[data-fav]").forEach((btn) => {
     btn.onclick = () => toggleFav(btn.dataset.fav, btn);
   });
+}
+
+/* ---------------- onboarding & setup checklist ---------------- */
+
+function maybeOnboard() {
+  if (localStorage.getItem("ts_onboarded")) return;
+  if (store.me && store.me.display_name && store.me.card_on_file) {
+    localStorage.setItem("ts_onboarded", "1");  // returning power user
+    return;
+  }
+  modal(`
+    <div class="inner" style="padding-top:30px">
+      <span class="kicker">👋 Welcome to the neighborhood</span>
+      <h2>Every tool on your street,<br>one tap away.</h2>
+      <p style="color:var(--muted);margin:10px 0 16px">Rent from neighbors for a few
+        dollars a day — or turn your idle tools into income. Two quick questions:</p>
+      <label style="font-weight:700;font-size:14px">What should neighbors call you?
+        <input id="ob-name" placeholder="e.g. Maya R." style="margin-top:6px;font-weight:400">
+      </label>
+      <p style="font-weight:700;font-size:14px;margin-top:16px">What brings you here?</p>
+      <div class="obrow">
+        <button class="btn obchoice" data-role="borrow">🔍 <b>Borrow tools</b><span>for projects, without buying</span></button>
+        <button class="btn obchoice" data-role="lend">🧰 <b>Lend my tools</b><span>earn from the garage</span></button>
+        <button class="btn obchoice" data-role="both">🔁 <b>Both</b><span>the full neighbor experience</span></button>
+      </div>
+      <p class="fineprint" style="margin-top:14px">You can change everything later in Profile.</p>
+    </div>`);
+  document.querySelectorAll(".obchoice").forEach((btn) => {
+    btn.onclick = async () => {
+      const name = $("#ob-name").value.trim();
+      if (name) {
+        await api("PATCH", "/v1/users/me", { display_name: name }).catch(() => {});
+        if (store.me) store.me.display_name = name;
+        renderWhoami();
+      }
+      localStorage.setItem("ts_onboarded", "1");
+      closeModal();
+      const role = btn.dataset.role;
+      if (role === "lend") { location.hash = "#/list"; toast("Snap a photo of any tool — the AI writes the listing ✨"); }
+      else { location.hash = "#/browse"; toast(name ? `Welcome, ${name}! Here's what your neighbors share 🏡` : "Here's what your neighbors share 🏡"); }
+      renderChecklist();
+    };
+  });
+}
+
+function checklistItems() {
+  const me = store.me || {};
+  return [
+    { done: !!me.display_name, label: "Add your name", hash: "#/profile" },
+    { done: !!me.card_on_file, label: "Add a payment method", hash: "#/profile" },
+    { done: !!me.id_verified, label: "Verify your ID", hash: "#/profile" },
+  ];
+}
+
+function renderChecklist() {
+  const box = $("#checklist-box");
+  if (!box) return;
+  if (localStorage.getItem("ts_checklist_done")) { box.innerHTML = ""; return; }
+  const items = checklistItems();
+  const done = items.filter((i) => i.done).length;
+  if (done === items.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="checklist">
+    <div class="cl-head"><b>🚀 Get set up — ${done} of ${items.length}</b>
+      <button class="cl-x" id="cl-dismiss" title="Dismiss">✕</button></div>
+    ${items.map((i) => `
+      <a class="cl-item ${i.done ? "done" : ""}" href="${i.hash}">
+        <span>${i.done ? "✅" : "⬜"}</span>${i.label}</a>`).join("")}
+  </div>`;
+  $("#cl-dismiss").onclick = () => {
+    localStorage.setItem("ts_checklist_done", "1");
+    box.innerHTML = "";
+  };
 }
 
 /* ---------------- neighborhood bar & wanted-nearby ---------------- */
@@ -318,6 +488,9 @@ function toolCard(r) {
   const rating = l.rating_count > 0 ? `<span class="chip">★ ${l.rating_avg}</span>` : "";
   const deposit = l.deposit_cents > 0 ? `<span class="chip">🛡 ${dollars(l.deposit_cents)} deposit</span>` : "";
   const instant = l.instant_book ? `<span class="chip warn">⚡ instant</span>` : "";
+  const avail = r.rented_until
+    ? `<span class="chip bad">⏳ back ${esc(String(r.rented_until).slice(5))}</span>`
+    : `<span class="chip ok">✅ available</span>`;
   return `<article class="toolcard" data-id="${esc(l.id)}">
     <div class="toolphoto">${photoHtml(l)}
       <span class="pricepill">${dollars(l.price_per_day_cents)}<small>/day</small></span>
@@ -326,7 +499,7 @@ function toolCard(r) {
     <div class="body">
       <h3>${esc(l.title)}</h3>
       <div class="meta">
-        <span class="chip ok">📍 ${r.distance_km.toFixed(1)} km</span>${rating}${deposit}${instant}
+        ${avail}<span class="chip">📍 ${r.distance_km.toFixed(1)} km</span>${rating}${deposit}${instant}
       </div>
     </div>
   </article>`;
@@ -450,12 +623,20 @@ async function openListing(id) {
       };
     });
   };
+  const thumbs = (l.photos || []).length > 1
+    ? `<div class="thumbs">${l.photos.map((p, i) =>
+        `<img src="${esc(p)}" data-thumb="${i}" class="${i === 0 ? "on" : ""}" alt="">`).join("")}</div>`
+    : "";
   modal(`
-    <div class="mphoto">${photoHtml(l)}
+    <div class="mphoto" id="m-hero">${photoHtml(l)}
       <button class="closex" onclick="closeModal()">✕</button>
     </div>
+    ${thumbs}
     <div class="inner">
-      <h2>${esc(l.title)}</h2>
+      <h2>${esc(l.title)}
+        ${avail.booked.some((b) => b.start_date <= isoInDays(0) && b.end_date >= isoInDays(0))
+          ? '<span class="chip bad">⏳ out on a rental</span>'
+          : '<span class="chip ok">✅ available</span>'}</h2>
       <p style="color:var(--muted);margin:6px 0 2px">
         ${CATEGORIES[l.category] || "🧰"} ${esc(l.category.replace(/_/g, " "))} · condition: ${esc(l.condition)}
         ${l.rating_count ? ` · ★ ${l.rating_avg} (${l.rating_count})` : ""}
@@ -472,6 +653,13 @@ async function openListing(id) {
     </div>
   `);
   render();
+  document.querySelectorAll("[data-thumb]").forEach((img) => {
+    img.onclick = () => {
+      $("#m-hero").innerHTML = `<img src="${esc(l.photos[+img.dataset.thumb])}" alt="${esc(l.title)}">
+        <button class="closex" onclick="closeModal()">✕</button>`;
+      document.querySelectorAll("[data-thumb]").forEach((t) => t.classList.toggle("on", t === img));
+    };
+  });
   $("#m-report").onclick = () => reportTarget("listing", l.id);
   $("#m-request").onclick = async () => {
     try {
@@ -631,13 +819,15 @@ function bindPhotoPicker() {
   const input = $("#photo-input");
   pick.onclick = () => input.click();
   input.onchange = async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    store.photoBlob = await downscale(file, 1280, 0.85);
-    const url = URL.createObjectURL(store.photoBlob);
+    const files = [...(input.files || [])].slice(0, 4);
+    if (!files.length) return;
+    store.photoBlobs = await Promise.all(files.map((f) => downscale(f, 1280, 0.85)));
+    const url = URL.createObjectURL(store.photoBlobs[0]);
     $("#photopick-icon").outerHTML = `<img id="photopick-icon" src="${url}" alt="preview">`;
-    $("#photopick-label").textContent = "✨ Identifying your tool…";
-    identifyTool(store.photoBlob);
+    $("#photopick-label").textContent = files.length > 1
+      ? `✨ Identifying your tool… (${files.length} photos)`
+      : "✨ Identifying your tool…";
+    identifyTool(store.photoBlobs[0]);
   };
 }
 
@@ -706,10 +896,12 @@ async function submitListing(ev) {
       instant_book: $("#instant-check").checked,
       price_per_week_cents: Math.round(parseFloat(f.weekprice.value || "0") * 100),
     });
-    if (store.photoBlob) {
-      btn.textContent = "Uploading photo…";
-      await apiUpload(`/v1/listings/${listing.id}/photo`, store.photoBlob, "tool.jpg");
-      store.photoBlob = null;
+    if (store.photoBlobs && store.photoBlobs.length) {
+      for (let i = 0; i < store.photoBlobs.length; i++) {
+        btn.textContent = `Uploading photo ${i + 1}/${store.photoBlobs.length}…`;
+        await apiUpload(`/v1/listings/${listing.id}/photo`, store.photoBlobs[i], `tool${i}.jpg`);
+      }
+      store.photoBlobs = [];
     }
     f.reset(); f.price.value = 8; f.deposit.value = 50;
     const icon = $("#photopick-icon");
@@ -752,8 +944,26 @@ async function loadRentals() {
       root.innerHTML = `<div class="empty"><span class="big">🤝</span>No rentals yet.<br>Find a tool in <b>Browse</b> or plan a <b>Project kit</b>.</div>`;
       return;
     }
-    const cards = await Promise.all(bookings.map(rentalCard));
-    root.innerHTML = `<div class="rentallist">${cards.join("")}</div>`;
+    const TERMINAL = ["completed", "declined", "expired", "cancelled_by_borrower", "cancelled_by_lender"];
+    const active = bookings.filter((b) => !TERMINAL.includes(b.state));
+    const history = bookings.filter((b) => TERMINAL.includes(b.state));
+    const borrowing = active.filter((b) => b.borrower_uid === store.uid);
+    const lending = active.filter((b) => b.lender_uid === store.uid);
+    const section = async (title, list) => list.length
+      ? `<div class="section-title">${title} <span class="chip">${list.length}</span></div>
+         <div class="rentallist">${(await Promise.all(list.map(rentalCard))).join("")}</div>`
+      : "";
+    const historyHtml = history.length
+      ? `<details class="historybox"${store.historyOpen ? " open" : ""}>
+         <summary>🗂 History · ${history.length} finished rental${history.length > 1 ? "s" : ""}</summary>
+         <div class="rentallist">${(await Promise.all(history.map(rentalCard))).join("")}</div></details>`
+      : "";
+    root.innerHTML =
+      (await section("🔍 Borrowing", borrowing)) +
+      (await section("🧰 Lending out", lending)) +
+      historyHtml;
+    const hb = root.querySelector(".historybox");
+    if (hb) hb.addEventListener("toggle", () => { store.historyOpen = hb.open; });
     root.querySelectorAll(".rental").forEach((el) => {
       el.onclick = (ev) => {
         if (ev.target.closest("button, input")) return;
@@ -808,7 +1018,7 @@ async function renderBookingDetail(id) {
       act("Cancel booking", "cancel", "btn-danger");
     }
     if (b.state === "picked_up" && isLender) act("📦 Tool returned — all good", "return");
-    if (b.state === "completed") acts.push(`<button class="btn" data-act="review">⭐ Leave a 5★ review</button>`);
+    if (b.state === "completed") acts.push(`<button class="btn" data-act="review">⭐ Leave a review</button>`);
 
     // Condition documentation: photos at each handoff + the AI comparison.
     let condition = "";
@@ -898,11 +1108,7 @@ async function bookingAction(id, action) {
       input.value = "";
       return renderBookingDetail(id);
     }
-    if (action === "review") {
-      await api("POST", `/v1/bookings/${id}/reviews`, { stars: 5, text: "" });
-      toast("Thanks for the review! ⭐");
-      return;
-    }
+    if (action === "review") return openReviewComposer(id);
     if (action === "cancel") {
       // Show the exact refund consequences before anything happens.
       const b = await api("GET", `/v1/bookings/${id}`);
@@ -933,10 +1139,19 @@ async function loadProfile() {
     const p = await api("GET", "/v1/users/me");
     const name = p.display_name || p.uid;
     $("#profile-name").textContent = name;
-    $("#profile-email").textContent = p.email || (store.token ? "" : "Demo identity — staging only");
-    $("#whoami-name").textContent = name;
-    $("#whoami-dot").textContent = initial(name);
-    $("#profile-avatar").textContent = initial(name);
+    $("#profile-email").textContent = p.email
+      || (store.token ? "" : "Guest session — sign in with Google to keep your profile");
+    store.me = p;
+    renderWhoami();
+    $("#profile-avatar").innerHTML = p.photo_url
+      ? `<img src="${esc(p.photo_url)}" alt="" referrerpolicy="no-referrer">`
+      : esc(initial(name));
+    $("#profile-since").textContent = p.created_at
+      ? "Member since " + new Date(p.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+      : "";
+    $("#view-as-btn").onclick = () => openPublicProfile(p.uid);
+    const cfg = await authConfig();
+    document.querySelector(".switcher").style.display = cfg.dev_auth ? "" : "none";
     $("#profile-rating").textContent = p.rating_count > 0
       ? `★ ${p.rating_avg} · ${p.rating_count} review${p.rating_count > 1 ? "s" : ""}`
       : "No reviews yet";
@@ -947,17 +1162,105 @@ async function loadProfile() {
       p.stripe_connect_id ? `<span class="badge">🏦 Payouts active</span>` : "",
       p.rating_count > 0 ? `<span class="badge">⭐ Reviewed neighbor</span>` : "",
     ].join("") || `<span class="chip">New neighbor — add a card to start renting</span>`;
-    store.me = p;
     renderCard(p, name);
     renderLadder(p);
+    renderChecklist();
     loadLedger();
     loadFavorites();
+    loadMyReviews(p.uid);
     $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
     $("#credit-chip").innerHTML = p.credit_cents > 0
       ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
       : `<span class="opt">No credit yet — every accepted invite is worth $10.</span>`;
     loadMyTools();
   } catch (e) { toast(e.message, true); }
+}
+
+function starRow(stars) {
+  return "★".repeat(stars) + "☆".repeat(5 - stars);
+}
+
+async function reviewsHtml(uid) {
+  const reviews = await api("GET", `/v1/users/${encodeURIComponent(uid)}/reviews`);
+  if (!reviews.length) return { count: 0, html: `<p class="opt">No reviews yet — they arrive after completed rentals.</p>` };
+  const rows = await Promise.all(reviews.slice(0, 10).map(async (r) => {
+    const from = await profileOf(r.from_uid);
+    return `<div class="reviewrow">
+      <span class="dot">${esc(initial(from.display_name || r.from_uid))}</span>
+      <div><div><b>${esc(from.display_name || r.from_uid)}</b>
+        <span class="stars">${starRow(r.stars)}</span></div>
+        ${r.text ? `<div class="opt">${esc(r.text)}</div>` : ""}</div>
+    </div>`;
+  }));
+  return { count: reviews.length, html: rows.join("") };
+}
+
+async function loadMyReviews(uid) {
+  try {
+    const { count, html } = await reviewsHtml(uid);
+    $("#reviews-count").textContent = `${count}`;
+    $("#reviews-box").innerHTML = html;
+  } catch { $("#reviews-box").innerHTML = ""; }
+}
+
+async function openPublicProfile(uid) {
+  try {
+    const [p, reviews] = await Promise.all([
+      api("GET", `/v1/users/${encodeURIComponent(uid)}`),
+      reviewsHtml(uid),
+    ]);
+    const name = p.display_name || uid;
+    modal(`
+      <div class="inner" style="padding-top:30px">
+        <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+        <span class="kicker">👁 How neighbors see you</span>
+        <div class="profile-head" style="margin-top:10px">
+          <div class="avatar">${p.photo_url ? `<img src="${esc(p.photo_url)}" alt="" referrerpolicy="no-referrer">` : esc(initial(name))}</div>
+          <div>
+            <div class="profile-name">${esc(name)}</div>
+            <div class="profile-rating">${p.rating_count ? `${starRow(Math.round(p.rating_avg))} ${p.rating_avg} · ${p.rating_count} review${p.rating_count > 1 ? "s" : ""}` : "No reviews yet"}</div>
+          </div>
+        </div>
+        ${p.bio ? `<p style="margin:10px 0">${esc(p.bio)}</p>` : `<p class="opt" style="margin:10px 0">No bio yet — a friendly line builds trust.</p>`}
+        <div class="badges">
+          ${p.id_verified ? `<span class="badge">🪪 ID verified</span>` : ""}
+          ${p.card_on_file ? `<span class="badge">💳 Card verified</span>` : ""}
+        </div>
+        <div class="section-title">⭐ Reviews</div>
+        ${reviews.html}
+      </div>`);
+  } catch (e) { toast(e.message, true); }
+}
+
+function openReviewComposer(bookingId) {
+  let stars = 5;
+  modal(`
+    <div class="inner" style="padding-top:30px">
+      <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+      <span class="kicker">⭐ Rate this rental</span>
+      <h2>How did it go?</h2>
+      <div class="starpick" id="starpick"></div>
+      <textarea id="review-text" rows="3" placeholder="e.g. Tool was in great shape, easy porch pickup 👍" style="margin-top:12px"></textarea>
+      <button class="btn btn-primary btn-big" id="review-send" style="width:100%;margin-top:14px">Post review</button>
+      <p class="fineprint">Reviews are public and build your neighbor's reputation.</p>
+    </div>`);
+  const paint = () => {
+    $("#starpick").innerHTML = [1, 2, 3, 4, 5].map((n) =>
+      `<button class="starbtn ${n <= stars ? "on" : ""}" data-n="${n}">★</button>`).join("");
+    document.querySelectorAll(".starbtn").forEach((b) => {
+      b.onclick = () => { stars = +b.dataset.n; paint(); };
+    });
+  };
+  paint();
+  $("#review-send").onclick = async () => {
+    try {
+      await api("POST", `/v1/bookings/${bookingId}/reviews`,
+        { stars, text: $("#review-text").value.trim() });
+      closeModal();
+      toast("Review posted — thanks for building neighborhood trust ⭐");
+      loadRentals();
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 async function loadLedger() {
@@ -1063,16 +1366,26 @@ async function loadMyTools() {
       <div class="stat-tile"><div class="num">${dollars(totalEarned)}</div><div class="lbl">Earned (100% yours)</div></div>`;
     listEl.innerHTML = tools.map((t, i) => {
       const h = histories[i];
-      const active = h && h.active_borrower
-        ? `<span class="chip warn">with ${esc(h.active_borrower)} until ${esc(h.active_until)}</span>`
-        : `<span class="chip ok">available</span>`;
+      const today = new Date().toISOString().slice(0, 10);
+      const overdue = h && h.active_borrower && h.active_until && h.active_until < today;
+      const active = t.status === "paused"
+        ? `<span class="chip">⏸ paused</span>`
+        : overdue
+          ? `<span class="chip bad">⚠️ overdue — with ${esc(h.active_borrower)} since ${esc(h.active_until)}</span>`
+          : h && h.active_borrower
+            ? `<span class="chip warn">with ${esc(h.active_borrower)} until ${esc(h.active_until)}</span>`
+            : `<span class="chip ok">available</span>`;
       const rows = (h && h.entries.length
         ? `<table><tr><th>Renter</th><th>Dates</th><th>Days</th><th>Earned</th></tr>` +
           h.entries.map((e) =>
             `<tr><td>${esc(e.borrower_name)}</td><td>${esc(e.start_date)} → ${esc(e.end_date)}</td>` +
             `<td>${e.days}</td><td>${dollars(e.earned_cents)}</td></tr>`).join("") + `</table>`
         : `<p class="opt" style="margin-top:8px">No rentals yet for this tool.</p>`)
-        + `<button class="btn" style="margin-top:10px" data-blackout="${esc(t.id)}">📅 Block dates</button>`;
+        + `<div class="actions" style="margin-top:10px">
+             <button class="btn" data-blackout="${esc(t.id)}">📅 Block dates</button>
+             <button class="btn" data-price="${esc(t.id)}">✏️ Change price</button>
+             <button class="btn" data-pause="${esc(t.id)}">${t.status === "paused" ? "▶️ Reactivate" : "⏸ Pause listing"}</button>
+           </div>`;
       return `<div class="mytool" data-i="${i}">
         <div class="row1"><span>${CATEGORIES[t.category] || "🧰"}</span><span class="t">${esc(t.title)}</span>${active}</div>
         <div class="sub">${dollars(t.price_per_day_cents)}/day · rented ${h ? h.times_rented : 0}× · ${h ? h.total_days_rented : 0} days total · earned ${dollars(h ? h.total_earned_cents : 0)}</div>
@@ -1081,13 +1394,37 @@ async function loadMyTools() {
     }).join("");
     listEl.querySelectorAll(".mytool").forEach((el) => {
       el.onclick = (ev) => {
-        if (ev.target.closest("[data-blackout]")) return;
+        if (ev.target.closest("[data-blackout],[data-price],[data-pause]")) return;
         const hist = el.querySelector(".hist");
         hist.style.display = hist.style.display === "none" ? "block" : "none";
       };
     });
     listEl.querySelectorAll("[data-blackout]").forEach((btn) => {
       btn.onclick = () => openBlackoutEditor(tools.find((t) => t.id === btn.dataset.blackout));
+    });
+    listEl.querySelectorAll("[data-price]").forEach((btn) => {
+      btn.onclick = async () => {
+        const t = tools.find((x) => x.id === btn.dataset.price);
+        const v = prompt("New price per day ($):", (t.price_per_day_cents / 100).toFixed(0));
+        const cents = Math.round(parseFloat(v || "") * 100);
+        if (!cents || cents < 500) { if (v !== null) toast("Minimum price is $5/day", true); return; }
+        try {
+          await api("PATCH", `/v1/listings/${t.id}`, { price_per_day_cents: cents });
+          toast(`Price updated to ${dollars(cents)}/day ✓`);
+          loadMyTools();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+    listEl.querySelectorAll("[data-pause]").forEach((btn) => {
+      btn.onclick = async () => {
+        const t = tools.find((x) => x.id === btn.dataset.pause);
+        const to = t.status === "paused" ? "active" : "paused";
+        try {
+          await api("PATCH", `/v1/listings/${t.id}`, { status: to });
+          toast(to === "paused" ? "Listing paused — hidden from browse ⏸" : "Listing live again ▶️");
+          loadMyTools();
+        } catch (e) { toast(e.message, true); }
+      };
     });
   } catch (e) {
     listEl.innerHTML = `<p class="opt">⚠️ ${esc(e.message)}</p>`;
@@ -1276,7 +1613,10 @@ function boot() {
   bindPhotoPicker();
   $("#uid-btn").onclick = switchUser;
   $("#uid-input").addEventListener("keydown", (e) => { if (e.key === "Enter") switchUser(); });
-  $("#whoami").onclick = () => { location.hash = "#/profile"; };
+  $("#whoami").onclick = () => {
+    if (!store.token) openSignIn();
+    else location.hash = "#/profile";
+  };
   $("#save-profile-btn").onclick = saveProfile;
   $("#signout-btn").onclick = () => {
     localStorage.removeItem("ts_token");
@@ -1299,7 +1639,12 @@ function boot() {
     await navigator.clipboard.writeText($("#ref-link").value).catch(() => {});
     toast("Invite link copied — worth $10 to you and your neighbor 🎁");
   };
-  api("GET", "/v1/users/me").then((p) => { store.me = p; }).catch(() => {});
+  api("GET", "/v1/users/me").then((p) => {
+    store.me = p;
+    renderWhoami();
+    renderChecklist();
+    maybeOnboard();
+  }).catch(() => {});
   $("#bell").onclick = toggleNotifPanel;
   document.addEventListener("click", (ev) => {
     if (!ev.target.closest("#notif-panel, #bell")) $("#notif-panel").hidden = true;
@@ -1313,5 +1658,24 @@ function boot() {
   route();
   loadNotifs();
   setInterval(loadNotifs, 45000);
+  setInterval(pollChat, 6000);
+}
+
+async function pollChat() {
+  // Live-ish chat: refresh only the message list of the open booking so a
+  // draft being typed is never clobbered.
+  if (!openBooking || !location.hash.includes("rentals")) return;
+  const box = document.querySelector(`#detail-${CSS.escape(openBooking)} .msgs`);
+  if (!box) return;
+  try {
+    const msgs = await api("GET", `/v1/bookings/${openBooking}/messages`);
+    const html = msgs.map((m) =>
+      `<div class="msg ${m.sender_uid === store.uid ? "mine" : "theirs"}">${esc(m.text)}</div>`).join("")
+      || '<span class="opt">Say hi and arrange the handoff 👋</span>';
+    if (box.innerHTML !== html) {
+      box.innerHTML = html;
+      box.scrollTop = 1e6;
+    }
+  } catch { /* transient */ }
 }
 boot();
