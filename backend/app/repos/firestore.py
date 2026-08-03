@@ -121,6 +121,11 @@ class FirestoreBookingRepo:
         docs = self.col.where("listing_id", "==", listing_id).stream()
         return [_doc_to(Booking, d) for d in docs]
 
+    def by_state(self, state, limit: int = 100) -> list[Booking]:
+        value = state.value if hasattr(state, "value") else state
+        docs = self.col.where("state", "==", value).limit(limit).stream()
+        return [_doc_to(Booking, d) for d in docs]
+
     def overlapping(self, listing_id: str, start: date, end: date) -> list[Booking]:
         blocking = [
             BookingState.APPROVED.value,
@@ -189,6 +194,12 @@ class FirestoreReportRepo:
     def create(self, report: Report) -> Report:
         self.col.document(report.id).set(report.model_dump(exclude={"id"}, mode="json"))
         return report
+
+    def recent(self, limit: int = 100) -> list[Report]:
+        docs = self.col.limit(200).stream()
+        items = [_doc_to(Report, d) for d in docs]
+        items.sort(key=lambda r: r.created_at.isoformat() if r.created_at else "", reverse=True)
+        return items[:limit]
 
 
 class FirestoreKitRepo:

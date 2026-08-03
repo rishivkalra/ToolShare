@@ -21,13 +21,15 @@ from ..models import WantedSignal
 from ..pricing import rental_days
 from ..repos.memory import next_id
 from ..services.photos import MAX_PHOTO_BYTES
+from ..services.ratelimit import rate_limit
 from ..services.tool_id import ToolIdSuggestion
 
 router = APIRouter(prefix="/v1/listings", tags=["listings"])
 photos_router = APIRouter(prefix="/v1/photos", tags=["listings"])
 
 
-@router.post("", response_model=Listing, status_code=201)
+@router.post("", response_model=Listing, status_code=201,
+             dependencies=[rate_limit("listing-create", 20)])
 def create_listing(
     body: ListingCreate,
     uid: str = Depends(current_uid),
@@ -72,7 +74,8 @@ def create_listing(
     return listing
 
 
-@router.get("/search", response_model=list[ListingSearchResult])
+@router.get("/search", response_model=list[ListingSearchResult],
+            dependencies=[rate_limit("search", 600)])
 def search(
     lat: float = Query(ge=-90, le=90),
     lng: float = Query(ge=-180, le=180),
@@ -164,7 +167,8 @@ def price_suggestion(
                            based_on=len(prices))
 
 
-@router.post("/identify", response_model=ToolIdSuggestion)
+@router.post("/identify", response_model=ToolIdSuggestion,
+             dependencies=[rate_limit("identify", 20)])
 async def identify_tool(
     file: UploadFile,
     uid: str = Depends(current_uid),
@@ -196,7 +200,8 @@ def get_listing(listing_id: str, c: Container = Depends(get_container)):
     return listing
 
 
-@router.post("/{listing_id}/photo", response_model=Listing)
+@router.post("/{listing_id}/photo", response_model=Listing,
+             dependencies=[rate_limit("photo-upload", 60)])
 async def upload_photo(
     listing_id: str,
     file: UploadFile,

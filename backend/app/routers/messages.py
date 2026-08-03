@@ -8,6 +8,7 @@ from ..auth import current_uid
 from ..deps import Container, get_container
 from ..models import Message, MessageCreate
 from ..repos.memory import next_id
+from ..services.ratelimit import rate_limit
 
 router = APIRouter(prefix="/v1/bookings/{booking_id}/messages", tags=["messages"])
 
@@ -19,7 +20,8 @@ def _require_participant(booking_id: str, uid: str, c: Container):
     return booking
 
 
-@router.post("", response_model=Message, status_code=201)
+@router.post("", response_model=Message, status_code=201,
+             dependencies=[rate_limit("message", 120)])
 def send_message(
     booking_id: str,
     body: MessageCreate,

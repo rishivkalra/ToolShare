@@ -315,6 +315,9 @@ def run_env(project_id: str, base_url: str) -> list[dict]:
         "TOOLSHARE_SERVICE_BASE_URL": base_url,
         "TOOLSHARE_VAPID_PUBLIC_KEY": state["vapid_public"],
         "TOOLSHARE_VAPID_PRIVATE_KEY": state["vapid_private"],
+        # Founder console access. Staging default: the demo identity; add
+        # real uids via: gcp_provision.py --admin-uids "demo,g1234..."
+        "TOOLSHARE_ADMIN_UIDS": state.get("admin_uids", "demo"),
     }
     # Set once via: gcp_provision.py --google-client-id <id>.apps.googleusercontent.com
     # (creating the OAuth Web client itself is a one-time Cloud Console step).
@@ -393,6 +396,9 @@ def main():
         billing = sys.argv[sys.argv.index("--billing") + 1]
     if "--google-client-id" in sys.argv:
         state["google_client_id"] = sys.argv[sys.argv.index("--google-client-id") + 1]
+        save_state()
+    if "--admin-uids" in sys.argv:
+        state["admin_uids"] = sys.argv[sys.argv.index("--admin-uids") + 1]
         save_state()
     project_id = ensure_project()
     if billing:

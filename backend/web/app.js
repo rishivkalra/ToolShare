@@ -1200,6 +1200,7 @@ async function loadProfile() {
     loadFavorites();
     loadMyReviews(p.uid);
     loadAlerts();
+    loadAdmin();
     $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
     $("#credit-chip").innerHTML = p.credit_cents > 0
       ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
@@ -1293,6 +1294,51 @@ function openReviewComposer(bookingId) {
       loadRentals();
     } catch (e) { toast(e.message, true); }
   };
+}
+
+async function loadAdmin() {
+  const root = $("#admin-root");
+  root.innerHTML = "";
+  let data;
+  try { data = await api("GET", "/v1/admin/overview"); }
+  catch { return; }  // not an admin — panel simply doesn't exist
+  const reports = data.reports.map((r) => `
+    <div class="reviewrow"><span>🚨</span>
+      <div><b>${esc(r.target_type)}</b> ${esc(r.target_id)}
+        <div class="opt">${esc(r.reason)}</div>
+        <div class="opt" style="font-size:11.5px">by ${esc(r.reporter_uid)} · ${timeAgo(r.created_at)}</div>
+      </div></div>`).join("")
+    || `<p class="opt">No open reports.</p>`;
+  const disputes = data.disputes.map((b) => `
+    <div class="reviewrow" style="align-items:flex-start"><span>⚖️</span>
+      <div style="flex:1"><b>${esc(b.listing_title)}</b> · ${dollars(b.price.deposit_cents)} deposit captured
+        <div class="opt">${esc(b.borrower_uid)} ↔ ${esc(b.lender_uid)} · ${esc(b.start_date)} → ${esc(b.end_date)}</div>
+        <div class="opt">${esc((b.timeline[b.timeline.length - 1] || {}).note || "")}</div>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn" data-resolve="refund_borrower" data-bid="${esc(b.id)}">↩️ Refund borrower</button>
+          <button class="btn btn-danger" data-resolve="pay_lender" data-bid="${esc(b.id)}">✅ Uphold claim — pay owner</button>
+        </div>
+      </div></div>`).join("")
+    || `<p class="opt">No open disputes.</p>`;
+  root.innerHTML = `<div class="panel" style="margin-bottom:0;border-color:var(--amber)">
+    <div class="section-title" style="margin-top:0">🛠 Founder console</div>
+    <p class="opt" style="margin-bottom:8px">Visible to admins only.</p>
+    <b style="font-size:14px">Open disputes</b>
+    ${disputes}
+    <b style="font-size:14px;display:block;margin-top:14px">Reports</b>
+    ${reports}
+  </div>`;
+  root.querySelectorAll("[data-resolve]").forEach((btn) => {
+    btn.onclick = async () => {
+      const note = prompt("Resolution note (optional, shared with both parties):") || "";
+      try {
+        await api("POST", `/v1/admin/disputes/${btn.dataset.bid}/resolve`,
+          { outcome: btn.dataset.resolve, note: note.trim() });
+        toast("Dispute resolved — both parties notified ⚖️");
+        loadAdmin();
+      } catch (e) { toast(e.message, true); }
+    };
+  });
 }
 
 async function loadAlerts() {

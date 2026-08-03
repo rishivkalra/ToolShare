@@ -22,6 +22,7 @@ from .services.google_auth import GoogleVerifier, build_verifier
 from .services.guides import GuideBuilder, build_guide_builder
 from .services.identity import FakeIdentity, IdentityProvider, StripeIdentity
 from .services.notify import Notifier
+from .services.ratelimit import RateLimiter
 from .services.tool_id import ToolIdentifier, build_identifier
 from .services.payments import FakePayments, PaymentProvider
 from .services.photos import GcsPhotoStore, MemoryPhotoStore, PhotoStore
@@ -52,6 +53,7 @@ class Container:
     saved_searches: SavedSearchRepo
     guides: GuideBuilder
     damage: DamageChecker
+    ratelimit: RateLimiter
 
 
 _container: Container | None = None
@@ -127,6 +129,7 @@ def build_container(settings: Settings) -> Container:
                                        settings.gemini_model),
             damage=build_damage_checker(settings.planner, settings.gcp_project,
                                         settings.gemini_model),
+            ratelimit=RateLimiter(),
         )
 
     from .repos.memory import (
@@ -171,6 +174,7 @@ def build_container(settings: Settings) -> Container:
                                    settings.gemini_model),
         damage=build_damage_checker(settings.planner, settings.gcp_project,
                                     settings.gemini_model),
+        ratelimit=RateLimiter(),
     )
 
 

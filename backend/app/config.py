@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     def session_signing_key(self) -> str:
         return self.session_secret or self.internal_task_secret or "toolshare-dev-sessions"
 
+    # Comma-separated uids allowed into /v1/admin/* (founder console:
+    # reports queue + dispute resolution).
+    admin_uids: str = ""
+
+    @property
+    def admin_uid_set(self) -> set[str]:
+        return {u.strip() for u in self.admin_uids.split(",") if u.strip()}
+
     @property
     def dev_auth_active(self) -> bool:
         if self.dev_auth_enabled is None:

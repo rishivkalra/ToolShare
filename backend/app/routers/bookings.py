@@ -30,6 +30,7 @@ from ..models import (
 )
 from ..pricing import price_booking
 from ..repos.memory import next_id
+from ..services.ratelimit import rate_limit
 from ..state_machine import TransitionError, transition
 
 router = APIRouter(prefix="/v1/bookings", tags=["bookings"])
@@ -129,7 +130,8 @@ def create_booking_request(
     return booking
 
 
-@router.post("", response_model=Booking, status_code=201)
+@router.post("", response_model=Booking, status_code=201,
+             dependencies=[rate_limit("booking-create", 40)])
 def request_booking(
     body: BookingCreate,
     uid: str = Depends(current_uid),
@@ -478,7 +480,8 @@ def confirm_return(
     return c.bookings.update(booking)
 
 
-@router.post("/{booking_id}/photos", response_model=Booking)
+@router.post("/{booking_id}/photos", response_model=Booking,
+             dependencies=[rate_limit("photo-upload", 60)])
 async def handoff_photo(
     booking_id: str,
     phase: str,
@@ -512,7 +515,8 @@ class DamageCheckResponse(BaseModel):
     notes: str
 
 
-@router.post("/{booking_id}/damage-check", response_model=DamageCheckResponse)
+@router.post("/{booking_id}/damage-check", response_model=DamageCheckResponse,
+             dependencies=[rate_limit("damage-check", 20)])
 def damage_check(
     booking_id: str,
     uid: str = Depends(current_uid),

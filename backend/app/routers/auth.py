@@ -17,6 +17,7 @@ from ..config import Settings, get_settings
 from ..deps import Container, get_container
 from ..models import UserProfile
 from ..services.google_auth import VerificationError
+from ..services.ratelimit import rate_limit
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -47,7 +48,8 @@ class SessionResponse(BaseModel):
     email: str
 
 
-@router.post("/google", response_model=SessionResponse)
+@router.post("/google", response_model=SessionResponse,
+             dependencies=[rate_limit("auth", 30)])
 def google_sign_in(
     body: GoogleSignIn,
     settings: Settings = Depends(get_settings),

@@ -98,6 +98,9 @@ class MemoryBookingRepo:
     def by_listing(self, listing_id: str) -> list[Booking]:
         return [b for b in self.bookings.values() if b.listing_id == listing_id]
 
+    def by_state(self, state, limit: int = 100) -> list[Booking]:
+        return [b for b in self.bookings.values() if b.state == state][:limit]
+
     def overlapping(self, listing_id: str, start: date, end: date) -> list[Booking]:
         blocking = {BookingState.CONFIRMED, BookingState.PICKED_UP, BookingState.APPROVED}
         return [
@@ -147,6 +150,9 @@ class MemoryReportRepo:
     def create(self, report: Report) -> Report:
         self.reports.append(report)
         return report
+
+    def recent(self, limit: int = 100) -> list[Report]:
+        return list(reversed(self.reports))[:limit]
 
 
 class MemoryNotificationRepo:

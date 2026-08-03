@@ -21,6 +21,7 @@ from ..models import (
     WantedSignal,
 )
 from ..repos.memory import next_id
+from ..services.ratelimit import rate_limit
 from ..services.project_planner import PlannedTool, ProjectPlan
 from .bookings import create_booking_request
 
@@ -72,7 +73,8 @@ def _match_listings(
     return [l for _, _, l in scored[:3]]
 
 
-@router.post("/plan", response_model=ProjectKitResponse)
+@router.post("/plan", response_model=ProjectKitResponse,
+             dependencies=[rate_limit("plan", 20)])
 def plan_project(
     body: ProjectPlanRequest,
     uid: str = Depends(current_uid),
@@ -145,7 +147,7 @@ def plan_project(
     )
 
 
-@router.post("/{kit_id}/guide")
+@router.post("/{kit_id}/guide", dependencies=[rate_limit("guide", 10)])
 def build_guide(
     kit_id: str,
     uid: str = Depends(current_uid),
@@ -186,7 +188,8 @@ class KitCheckoutResponse(BaseModel):
     failed: int
 
 
-@router.post("/checkout", response_model=KitCheckoutResponse)
+@router.post("/checkout", response_model=KitCheckoutResponse,
+             dependencies=[rate_limit("booking-create", 40)])
 def kit_checkout(
     body: KitCheckoutRequest,
     uid: str = Depends(current_uid),
