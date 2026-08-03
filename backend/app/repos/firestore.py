@@ -20,6 +20,7 @@ from google.cloud import firestore
 from ..models import (
     Booking,
     BookingState,
+    ProjectPost,
     Kit,
     Listing,
     Message,
@@ -226,6 +227,21 @@ class FirestoreWantedRepo:
         # created_at is stored as an ISO string; lexicographic range works.
         docs = self.col.where("created_at", ">=", cutoff_iso).limit(2000).stream()
         return [_doc_to(WantedSignal, d) for d in docs]
+
+
+class FirestorePostRepo:
+    def __init__(self, db: firestore.Client):
+        self.col = db.collection("posts")
+
+    def create(self, post: ProjectPost) -> ProjectPost:
+        self.col.document(post.id).set(post.model_dump(exclude={"id"}, mode="json"))
+        return post
+
+    def for_geohash(self, geohash: str, limit: int = 12) -> list[ProjectPost]:
+        docs = self.col.where("geohash", "==", geohash).limit(100).stream()
+        items = [_doc_to(ProjectPost, d) for d in docs]
+        items.sort(key=lambda p: p.created_at.isoformat() if p.created_at else "", reverse=True)
+        return items[:limit]
 
 
 class FirestoreSavedSearchRepo:

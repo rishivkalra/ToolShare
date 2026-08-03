@@ -217,9 +217,75 @@ def my_favorites(uid: str = Depends(current_uid), c: Container = Depends(get_con
     return out
 
 
+class Achievement(BaseModel):
+    key: str
+    icon: str
+    label: str
+    detail: str
+
+
+_DONE_STATES = {BookingState.RETURNED, BookingState.COMPLETED}
+
+
+@router.get("/{uid}/badges", response_model=list[Achievement])
+def achievements(uid: str, c: Container = Depends(get_container)):
+    """Computed achievements (never stored, never stale): the Duolingo-style
+    collectibles that make profiles feel like progress."""
+    tools = c.listings.by_owner(uid)
+    bookings = c.bookings.for_user(uid)
+    lent = [b for b in bookings if b.lender_uid == uid and b.state in _DONE_STATES]
+    borrowed = [b for b in bookings if b.borrower_uid == uid and b.state in _DONE_STATES]
+    earned = sum(b.price.rental_cents for b in lent)
+    user = c.users.get(uid)
+
+    out: list[Achievement] = []
+    if lent:
+        out.append(Achievement(key="first_lend", icon="🤝", label="First lend",
+                               detail="Completed a rental as an owner"))
+    if len(tools) >= 5:
+        out.append(Achievement(key="tool_hero", icon="🧰", label="Tool hero",
+                               detail=f"{len(tools)} tools listed for the street"))
+    if earned >= 10_000:
+        out.append(Achievement(key="power_lender", icon="💰", label="Power lender",
+                               detail=f"${earned / 100:.0f} earned from idle tools"))
+    if len(borrowed) >= 3:
+        out.append(Achievement(key="serial_borrower", icon="🔁", label="Serial borrower",
+                               detail=f"{len(borrowed)} rentals instead of purchases"))
+    if user and user.rating_count >= 5 and user.rating_avg >= 4.8:
+        out.append(Achievement(key="five_star", icon="🌟", label="5-star neighbor",
+                               detail=f"{user.rating_count} reviews averaging {user.rating_avg}"))
+    avg_minutes, is_super = _responsiveness(c, uid)
+    if is_super:
+        out.append(Achievement(key="super_lender", icon="⚡", label="Super lender",
+                               detail=f"Answers requests in ~{avg_minutes} min on average"))
+    return out
+
+
+def _responsiveness(c: Container, uid: str) -> tuple[int, bool]:
+    """(avg minutes to answer a request, super-lender?) from booking
+    timelines — the Airbnb-Superhost trust signal, computed not claimed.
+    Needs ≥3 answered requests; Super Lender = averages under 2 hours."""
+    waits = []
+    for b in c.bookings.for_user(uid):
+        if b.lender_uid != uid or not b.timeline:
+            continue
+        requested = next((e.at for e in b.timeline
+                          if e.to_state == BookingState.REQUESTED), None)
+        answered = next((e.at for e in b.timeline
+                         if e.to_state in (BookingState.APPROVED, BookingState.DECLINED)
+                         and e.actor_uid == uid), None)
+        if requested and answered and answered >= requested:
+            waits.append((answered - requested).total_seconds() / 60)
+    if len(waits) < 3:
+        return 0, False
+    avg = int(sum(waits) / len(waits))
+    return max(avg, 1), avg <= 120
+
+
 @router.get("/{uid}", response_model=UserProfile)
 def public_profile(uid: str, c: Container = Depends(get_container)):
     user = c.users.get(uid) or UserProfile(uid=uid)
+    avg_minutes, is_super = _responsiveness(c, uid)
     # Whitelist, don't blacklist: rebuild the payload from only the fields a
     # stranger should see (trust badges + reputation). Everything else —
     # email, card digits, credit balance, referral graph, favorites, Stripe
@@ -234,5 +300,7 @@ def public_profile(uid: str, c: Container = Depends(get_container)):
         card_on_file=user.card_on_file,  # badge only; last4 never leaves
         rating_avg=user.rating_avg,
         rating_count=user.rating_count,
+        avg_response_minutes=avg_minutes,
+        super_lender=is_super,
         created_at=user.created_at,
     )

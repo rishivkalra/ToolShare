@@ -75,6 +75,10 @@ class UserProfile(BaseModel):
     favorites: list[str] = Field(default_factory=list)  # listing ids, capped
     rating_avg: float = 0.0
     rating_count: int = 0
+    # Computed on public profiles only (Airbnb-Superhost pattern): how fast
+    # this lender answers requests, and the badge that follows from it.
+    avg_response_minutes: int = 0  # 0 = not enough data
+    super_lender: bool = False
     created_at: Optional[datetime] = None
 
 
@@ -277,6 +281,19 @@ class Kit(BaseModel):
     buy_estimate_cents: int = 0  # what buying all this would roughly cost
     geohash: str = ""  # 5-char neighborhood prefix
     guide: Optional[dict] = None  # cached AI build guide (services.guides)
+    created_at: Optional[datetime] = None
+
+
+class ProjectPost(BaseModel):
+    """A gratitude/show-off post on the neighborhood wall: what got built
+    with borrowed tools (the BuyNothing/#ThankANeighbor retention pattern)."""
+
+    id: str
+    uid: str
+    author_name: str = ""
+    geohash: str  # 5-char neighborhood prefix
+    photo_url: str = ""
+    caption: str = ""
     created_at: Optional[datetime] = None
 
 

@@ -8,6 +8,7 @@ from typing import Optional
 from ..models import (
     Booking,
     BookingState,
+    ProjectPost,
     Kit,
     Listing,
     Message,
@@ -202,6 +203,20 @@ class MemoryWantedRepo:
             s for s in self.signals
             if s.created_at and s.created_at.isoformat() >= cutoff_iso
         ]
+
+
+class MemoryPostRepo:
+    def __init__(self):
+        self.posts: list[ProjectPost] = []
+
+    def create(self, post: ProjectPost) -> ProjectPost:
+        self.posts.append(post)
+        return post
+
+    def for_geohash(self, geohash: str, limit: int = 12) -> list[ProjectPost]:
+        mine = [p for p in self.posts if p.geohash == geohash]
+        mine.sort(key=lambda p: p.created_at.isoformat() if p.created_at else "", reverse=True)
+        return mine[:limit]
 
 
 class MemorySavedSearchRepo:

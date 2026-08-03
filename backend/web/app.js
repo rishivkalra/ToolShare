@@ -205,7 +205,7 @@ function route() {
   TABS.forEach((t) => $(`#tab-${t}`).classList.toggle("active", t === active));
   document.querySelectorAll("[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === active));
-  if (active === "browse") { loadBrowse(); loadHood(); }
+  if (active === "browse") { loadBrowse(); loadHood(); loadPulse(); loadWall(); }
   if (active === "list") loadWanted();
   if (active === "rentals") loadRentals();
   if (active === "profile") loadProfile();
@@ -438,6 +438,94 @@ async function loadWanted() {
   } catch { box.innerHTML = ""; }
 }
 
+/* ---------------- pulse feed & project wall ---------------- */
+
+async function loadPulse() {
+  const box = $("#pulse-box");
+  try {
+    const p = await api("GET",
+      `/v1/neighborhoods/pulse?lat=${store.loc.lat}&lng=${store.loc.lng}`);
+    if (!p.events.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="pulsecard">
+      <div class="section-title" style="margin-top:0">🫀 Neighborhood pulse
+        ${p.saved_this_week_cents ? `<span class="chip ok">💰 ${dollars(p.saved_this_week_cents)} saved this week</span>` : ""}
+      </div>
+      ${p.events.map((e) => `<div class="pulserow"><span>${e.icon}</span>
+        <div>${esc(e.text)}</div><small>${timeAgo(e.when)}</small></div>`).join("")}
+    </div>`;
+  } catch { box.innerHTML = ""; }
+}
+
+async function loadWall() {
+  const box = $("#wall-box");
+  try {
+    const posts = await api("GET",
+      `/v1/posts?lat=${store.loc.lat}&lng=${store.loc.lng}`);
+    const cards = posts.map((p) => `<div class="wallcard">
+      ${p.photo_url ? `<img src="${esc(p.photo_url)}" alt="" loading="lazy">` : `<div class="wallph">🏗️</div>`}
+      <div class="wallbody">${esc(p.caption)}
+        <small>— ${esc(p.author_name)} · ${timeAgo(p.created_at)}</small></div>
+    </div>`).join("");
+    box.innerHTML = `<div class="section-title">🏗️ Built nearby with borrowed tools
+        <button class="btn" id="wall-share" style="margin-left:auto">📸 Share your build</button>
+      </div>
+      ${posts.length ? `<div class="wallgrid">${cards}</div>`
+        : `<p class="opt">Finished a project with a borrowed tool? Be the first to show it off.</p>`}`;
+    $("#wall-share").onclick = openWallComposer;
+  } catch { box.innerHTML = ""; }
+}
+
+function openWallComposer() {
+  let blob = null;
+  modal(`
+    <div class="inner" style="padding-top:30px">
+      <button class="closex" style="position:absolute;top:10px;right:10px" onclick="closeModal()">✕</button>
+      <span class="kicker">🏗️ Show the street</span>
+      <h2>What did you build?</h2>
+      <p style="color:var(--muted);margin:8px 0 14px">Your finished project is the best ad
+        a neighbor's tool can get — and a thank-you they'll actually see.</p>
+      <div class="photopick" id="wall-pick">
+        <span class="ph-icon" id="wall-pick-icon">📷</span>
+        <span id="wall-pick-label">Add a photo of the finished project</span>
+        <input type="file" id="wall-file" accept="image/*" capture="environment" style="display:none">
+      </div>
+      <textarea id="wall-caption" rows="2" maxlength="200" style="margin-top:12px"
+        placeholder="e.g. Raised garden bed done in a weekend — thanks for the saw, Maya! 🌱"></textarea>
+      <button class="btn btn-primary btn-big" id="wall-post" style="width:100%;margin-top:14px">Post to the wall</button>
+      <p class="fineprint">Posting unlocks after your first completed rental. Visible to the whole neighborhood.</p>
+    </div>`);
+  $("#wall-pick").onclick = () => $("#wall-file").click();
+  $("#wall-file").onchange = async () => {
+    const f = $("#wall-file").files[0];
+    if (!f) return;
+    blob = await downscale(f, 1280, 0.85);
+    $("#wall-pick-icon").outerHTML = `<img id="wall-pick-icon" src="${URL.createObjectURL(blob)}" alt="">`;
+    $("#wall-pick-label").textContent = "Looking good — tap to change";
+  };
+  $("#wall-post").onclick = async () => {
+    const caption = $("#wall-caption").value.trim();
+    if (caption.length < 5) { toast("Add a sentence about what you built", true); return; }
+    const form = new FormData();
+    form.append("caption", caption);
+    form.append("lat", store.loc.lat);
+    form.append("lng", store.loc.lng);
+    if (blob) form.append("file", blob, "build.jpg");
+    try {
+      const resp = await fetch("/v1/posts", {
+        method: "POST", headers: { Authorization: authHeader() }, body: form,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw Object.assign(new Error(data.detail || "Couldn't post"), { status: resp.status });
+      closeModal();
+      toast("On the wall — the whole street can see it 🏗️");
+      loadWall();
+    } catch (e) {
+      if (handleAuthRequired(e)) return;
+      toast(e.message, true);
+    }
+  };
+}
+
 /* ---------------- map view (vendored Leaflet + OSM tiles) ---------------- */
 
 let map = null, mapMarkers = [];
@@ -654,8 +742,10 @@ async function openListing(id) {
         ${l.rating_count ? ` · ★ ${l.rating_avg} (${l.rating_count})` : ""}
         ${l.instant_book ? ' <span class="instantchip">⚡ Instant book</span>' : ""}</p>
       <p style="margin:6px 0 2px;font-size:14px">Owner: <b>${esc(owner.display_name || l.owner_uid)}</b>
+        ${owner.super_lender ? `<span class="chip warn">⚡ Super lender</span>` : ""}
         ${owner.id_verified ? `<span class="chip ok">🪪 ID verified</span>` : ""}
-        ${owner.rating_count ? `<span class="chip ok">★ ${owner.rating_avg}</span>` : `<span class="chip">new lender</span>`}</p>
+        ${owner.rating_count ? `<span class="chip ok">★ ${owner.rating_avg}</span>` : `<span class="chip">new lender</span>`}
+        ${owner.avg_response_minutes ? `<span class="opt" style="font-size:12.5px"> · usually responds in ~${owner.avg_response_minutes < 90 ? owner.avg_response_minutes + " min" : Math.round(owner.avg_response_minutes / 60) + "h"}</span>` : ""}</p>
       ${l.description ? `<p style="margin:10px 0">${esc(l.description)}</p>` : ""}
       <div id="m-cal"></div>
       <div class="totalbox" id="m-total"></div>
@@ -1201,6 +1291,7 @@ async function loadProfile() {
     loadMyReviews(p.uid);
     loadAlerts();
     loadAdmin();
+    loadAchievements(p.uid, "#profile-achievements");
     $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
     $("#credit-chip").innerHTML = p.credit_cents > 0
       ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
@@ -1256,12 +1347,15 @@ async function openPublicProfile(uid) {
         </div>
         ${p.bio ? `<p style="margin:10px 0">${esc(p.bio)}</p>` : `<p class="opt" style="margin:10px 0">No bio yet — a friendly line builds trust.</p>`}
         <div class="badges">
+          ${p.super_lender ? `<span class="badge">⚡ Super lender</span>` : ""}
           ${p.id_verified ? `<span class="badge">🪪 ID verified</span>` : ""}
           ${p.card_on_file ? `<span class="badge">💳 Card verified</span>` : ""}
         </div>
+        <div class="badges" id="pp-achievements" style="margin-top:6px"></div>
         <div class="section-title">⭐ Reviews</div>
         ${reviews.html}
       </div>`);
+    loadAchievements(uid, "#pp-achievements");
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1398,6 +1492,16 @@ async function loadFavorites() {
       el.onclick = () => openListing(el.dataset.open);
     });
   } catch { box.innerHTML = ""; }
+}
+
+async function loadAchievements(uid, sel) {
+  try {
+    const badges = await api("GET", `/v1/users/${encodeURIComponent(uid)}/badges`);
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.innerHTML = badges.map((b) =>
+      `<span class="badge" title="${esc(b.detail)}">${b.icon} ${esc(b.label)}</span>`).join("");
+  } catch { /* non-fatal */ }
 }
 
 function renderLadder(p) {

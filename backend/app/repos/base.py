@@ -9,6 +9,7 @@ from typing import Optional, Protocol
 
 from ..models import (
     Booking,
+    ProjectPost,
     Kit,
     Listing,
     Message,
@@ -83,6 +84,11 @@ class KitRepo(Protocol):
 class WantedRepo(Protocol):
     def create(self, signal: WantedSignal) -> WantedSignal: ...
     def since(self, cutoff_iso: str) -> list[WantedSignal]: ...
+
+
+class PostRepo(Protocol):
+    def create(self, post: ProjectPost) -> ProjectPost: ...
+    def for_geohash(self, geohash: str, limit: int = 12) -> list[ProjectPost]: ...
 
 
 class SavedSearchRepo(Protocol):

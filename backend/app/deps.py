@@ -7,6 +7,7 @@ from .config import Settings, get_settings
 from .repos.base import (
     BookingRepo,
     KitRepo,
+    PostRepo,
     ListingRepo,
     MessageRepo,
     NotificationRepo,
@@ -51,6 +52,7 @@ class Container:
     wanted: WantedRepo
     tool_id: ToolIdentifier
     saved_searches: SavedSearchRepo
+    posts: PostRepo
     guides: GuideBuilder
     damage: DamageChecker
     ratelimit: RateLimiter
@@ -70,6 +72,7 @@ def build_container(settings: Settings) -> Container:
             FirestoreMessageRepo,
             FirestoreNotificationRepo,
             FirestorePushSubRepo,
+            FirestorePostRepo,
             FirestoreReportRepo,
             FirestoreReviewRepo,
             FirestoreSavedSearchRepo,
@@ -125,6 +128,7 @@ def build_container(settings: Settings) -> Container:
             tool_id=build_identifier(settings.planner, settings.gcp_project,
                                      settings.gemini_model),
             saved_searches=FirestoreSavedSearchRepo(db),
+            posts=FirestorePostRepo(db),
             guides=build_guide_builder(settings.planner, settings.gcp_project,
                                        settings.gemini_model),
             damage=build_damage_checker(settings.planner, settings.gcp_project,
@@ -138,6 +142,7 @@ def build_container(settings: Settings) -> Container:
         MemoryListingRepo,
         MemoryMessageRepo,
         MemoryNotificationRepo,
+        MemoryPostRepo,
         MemoryPushSubRepo,
         MemoryReportRepo,
         MemoryReviewRepo,
@@ -170,6 +175,7 @@ def build_container(settings: Settings) -> Container:
         tool_id=build_identifier(settings.planner, settings.gcp_project,
                                  settings.gemini_model),
         saved_searches=MemorySavedSearchRepo(),
+        posts=MemoryPostRepo(),
         guides=build_guide_builder(settings.planner, settings.gcp_project,
                                    settings.gemini_model),
         damage=build_damage_checker(settings.planner, settings.gcp_project,

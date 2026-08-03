@@ -14,6 +14,7 @@ from .routers import (
     messages,
     neighborhoods,
     notifications,
+    posts,
     projects,
     public,
     reports,
@@ -46,6 +47,7 @@ app.include_router(webhooks.router)
 app.include_router(neighborhoods.router)
 app.include_router(searches.router)
 app.include_router(admin.router)
+app.include_router(posts.router)
 app.include_router(public.router)
 app.include_router(listings.photos_router)
 

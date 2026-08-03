@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from html import escape
 
 from ..deps import Container, get_container
-from .neighborhoods import compute_stats
+from .neighborhoods import compute_pulse, compute_stats
 
 router = APIRouter(tags=["public"], include_in_schema=False)
 
@@ -150,5 +150,41 @@ def neighborhood_page(gh5: str, c: Container = Depends(get_container)):
     <div class="pubcard">
       <h2 style="font-size:22px;margin-bottom:8px">Wanted nearby</h2>
       {wanted}
-    </div>"""
+    </div>
+    {_pulse_card(c, gh5)}
+    {_wall_card(c, gh5)}"""
     return HTMLResponse(_page(title, desc, "", body))
+
+
+def _pulse_card(c: Container, gh5: str) -> str:
+    p = compute_pulse(c, gh5[:5], limit=8)
+    if not p.events:
+        return ""
+    rows = "".join(
+        f'<div class="krow"><span>{e.icon}</span><div>{escape(e.text)}</div></div>'
+        for e in p.events
+    )
+    saved = (f'<p style="font-weight:700;color:#0A5A34;margin-bottom:8px">'
+             f'💰 ${p.saved_this_week_cents / 100:,.0f} of purchases avoided this week</p>'
+             if p.saved_this_week_cents else "")
+    return f"""<div class="pubcard">
+      <h2 style="font-size:22px;margin-bottom:8px">This week on your streets</h2>
+      {saved}{rows}
+    </div>"""
+
+
+def _wall_card(c: Container, gh5: str) -> str:
+    posts = c.posts.for_geohash(gh5[:5], limit=6)
+    if not posts:
+        return ""
+    rows = "".join(
+        '<div class="krow"><span>🏗️</span><div>'
+        + (f'<img src="{escape(p.photo_url)}" alt="" style="max-width:180px;border-radius:10px;display:block;margin-bottom:6px">'
+           if p.photo_url else "")
+        + f'{escape(p.caption)}<br><small>— {escape(p.author_name)}</small></div></div>'
+        for p in posts
+    )
+    return f"""<div class="pubcard">
+      <h2 style="font-size:22px;margin-bottom:8px">Built nearby with borrowed tools</h2>
+      {rows}
+    </div>"""
