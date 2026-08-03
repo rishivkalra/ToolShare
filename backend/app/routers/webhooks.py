@@ -22,7 +22,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ..config import Settings, get_settings
 from ..deps import Container, get_container
 from ..models import BookingState
-from ..state_machine import TransitionError, transition
 
 router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 
@@ -84,17 +83,25 @@ def _handle_rental_paid(c, obj: dict) -> None:
     if not booking or booking.state != BookingState.APPROVED:
         return  # already confirmed synchronously, or unknown — idempotent no-op
     booking.stripe_payment_intent = obj.get("id", booking.stripe_payment_intent)
+    # Run the exact same completion as the synchronous path: deposit hold,
+    # CONFIRMED transition, referral bounty, borrower notification.
+    from ..models import UserProfile
+    from .bookings import finalize_confirmation
+
+    borrower = c.users.get(booking.borrower_uid) or UserProfile(uid=booking.borrower_uid)
+    customer_id = c.payments.ensure_customer(borrower.uid, borrower.stripe_customer_id)
     try:
-        transition(booking, BookingState.CONFIRMED, "system", "payment confirmed (async)")
-    except TransitionError:
-        return
-    c.bookings.update(booking)
-    c.notifier.notify(
-        booking.borrower_uid,
-        f"Payment confirmed — {booking.listing_title} is booked",
-        "Arrange pickup in chat.",
-        booking_id=booking.id,
-    )
+        finalize_confirmation(c, booking, borrower, customer_id)
+    except Exception:
+        # Deposit hold failed: finalize already unwound charge + credit and
+        # persisted APPROVED. Tell the borrower; webhook itself returns 200.
+        c.notifier.notify(
+            booking.borrower_uid,
+            "Payment issue — update your card",
+            f"The deposit hold for {booking.listing_title} didn't go through; "
+            "your charge was refunded. Update your card and ask the owner to retry.",
+            booking_id=booking.id,
+        )
 
 
 def _handle_rental_failed(c, obj: dict) -> None:
@@ -104,6 +111,11 @@ def _handle_rental_failed(c, obj: dict) -> None:
     booking = c.bookings.get(meta.get("booking_id", ""))
     if not booking or booking.state != BookingState.APPROVED:
         return
+    # Async charge died: hand back any reserved credit so it isn't stranded.
+    from .bookings import release_pending_payment
+
+    release_pending_payment(c, booking)
+    c.bookings.update(booking)
     c.notifier.notify(
         booking.borrower_uid,
         "Payment failed — update your card",

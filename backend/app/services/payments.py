@@ -68,6 +68,7 @@ class FakePayments:
         self.payouts: list[tuple[str, int]] = []
         self.fail_next_charge = False
         self.fail_next_deposit = False
+        self.next_charge_processing = False  # simulate async 3DS cards
 
     def ensure_customer(self, uid: str, existing_customer_id: str) -> str:
         return existing_customer_id or f"cus_fake_{uid}"
@@ -87,6 +88,9 @@ class FakePayments:
         if self.fail_next_charge:
             self.fail_next_charge = False
             return PaymentResult(id=f"pi_fail_{next(self._n)}", status="failed")
+        if self.next_charge_processing:
+            self.next_charge_processing = False
+            return PaymentResult(id=f"pi_async_{next(self._n)}", status="processing")
         pid = f"pi_fake_{next(self._n)}"
         self.charges.append((pid, amount_cents))
         return PaymentResult(id=pid, status="succeeded")

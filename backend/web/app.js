@@ -168,7 +168,17 @@ function renderWhoami() {
     : esc(initial(name));
 }
 
+function handleAuthRequired(e) {
+  // Signed-out visitor hit an auth-only action: offer sign-in, not a raw 401.
+  if (e.status === 401 && !store.token) {
+    openSignIn();
+    return true;
+  }
+  return false;
+}
+
 function handleCardRequired(e) {
+  if (handleAuthRequired(e)) return true;
   if (e.status === 402) {
     toast("💳 Add a payment method first — it backs the deposit that protects owners.", true);
     location.hash = "#/profile";
@@ -287,7 +297,7 @@ function renderBrowse() {
         await api("POST", "/v1/searches", { term: q, lat: store.loc.lat, lng: store.loc.lng });
         toast("You'll get a notification the moment one is listed nearby 🔔");
         ab.disabled = true;
-      } catch (e) { toast(e.message, true); }
+      } catch (e) { if (!handleAuthRequired(e)) toast(e.message, true); }
     };
     return;
   }
@@ -474,6 +484,7 @@ function isFav(id) {
 async function toggleFav(id, btn) {
   try {
     const r = await api("PUT", `/v1/listings/${id}/favorite`);
+    if (r === null) return;
     if (store.me) {
       store.me.favorites = store.me.favorites || [];
       if (r.favorited) store.me.favorites.push(id);
@@ -481,7 +492,7 @@ async function toggleFav(id, btn) {
     }
     btn.textContent = r.favorited ? "❤️" : "🤍";
     toast(r.favorited ? "Saved to your favorites ❤️" : "Removed from favorites");
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { if (!handleAuthRequired(e)) toast(e.message, true); }
 }
 
 function toolCard(r) {
@@ -1018,7 +1029,10 @@ async function renderBookingDetail(id) {
       if (!mine) act("🤝 Confirm handoff", "pickup");
       act("Cancel booking", "cancel", "btn-danger");
     }
-    if (b.state === "picked_up" && isLender) act("📦 Tool returned — all good", "return");
+    if (b.state === "picked_up" && isLender) {
+      act("📦 Tool returned — all good", "return");
+      act("⚠️ Report damage", "dispute", "btn-danger");
+    }
     if (b.state === "completed") acts.push(`<button class="btn" data-act="review">⭐ Leave a review</button>`);
 
     // Condition documentation: photos at each handoff + the AI comparison.
@@ -1115,6 +1129,22 @@ async function bookingAction(id, action) {
       const b = await api("GET", `/v1/bookings/${id}`);
       if (!confirm(refundMath(b, b.lender_uid === store.uid))) return;
     }
+    if (action === "dispute") {
+      const reason = prompt(
+        "Describe the damage or problem (this opens a formal claim — the "
+        + "deposit hold is captured while ToolShare reviews it):");
+      if (!reason || reason.trim().length < 5) {
+        if (reason !== null) toast("Please describe the problem in a few words", true);
+        return;
+      }
+      if (!confirm("Open a damage claim? The borrower's deposit is captured "
+        + "and held by ToolShare until it's resolved. Run the AI condition "
+        + "check first if you haven't.")) return;
+      await api("POST", `/v1/bookings/${id}/dispute`, { reason: reason.trim() });
+      toast("Claim opened — the deposit is held and our team will review it 🛡️");
+      loadRentals();
+      return;
+    }
     if (action === "damage-check") {
       const r = await api("POST", `/v1/bookings/${id}/damage-check`);
       toast(r.verdict === "ok" ? "✅ AI check: no new damage visible"
@@ -1169,6 +1199,7 @@ async function loadProfile() {
     loadLedger();
     loadFavorites();
     loadMyReviews(p.uid);
+    loadAlerts();
     $("#ref-link").value = `${location.origin}/?ref=${encodeURIComponent(p.uid)}`;
     $("#credit-chip").innerHTML = p.credit_cents > 0
       ? `<span class="credit-pill">🎁 ${dollars(p.credit_cents)} rental credit — auto-applied at your next booking</span>`
@@ -1262,6 +1293,33 @@ function openReviewComposer(bookingId) {
       loadRentals();
     } catch (e) { toast(e.message, true); }
   };
+}
+
+async function loadAlerts() {
+  const box = $("#alerts-box");
+  try {
+    const alerts = await api("GET", "/v1/searches");
+    $("#alerts-count").textContent = `${alerts.length}`;
+    if (!alerts.length) {
+      box.innerHTML = `<p class="opt">None yet — search for a tool nobody has and tap “Alert me”.</p>`;
+      return;
+    }
+    box.innerHTML = alerts.map((a) => `
+      <div class="reviewrow" style="align-items:center">
+        <span>🔔</span>
+        <div style="flex:1"><b>${esc(a.term)}</b></div>
+        <button class="btn" style="padding:4px 10px" data-del-alert="${esc(a.id)}">✕</button>
+      </div>`).join("");
+    box.querySelectorAll("[data-del-alert]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api("DELETE", `/v1/searches/${btn.dataset.delAlert}`);
+          toast("Alert removed");
+          loadAlerts();
+        } catch (e) { toast(e.message, true); }
+      };
+    });
+  } catch { box.innerHTML = ""; }
 }
 
 async function loadLedger() {

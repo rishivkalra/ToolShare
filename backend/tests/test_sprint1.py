@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import date, timedelta
 
 from .conftest import add_card, auth
 
@@ -10,24 +11,27 @@ from .conftest import add_card, auth
 # ---------------- availability & blackouts ----------------
 
 def test_availability_shows_booked_and_blackouts(client, listing):
+    # Future-relative dates: the availability endpoint hides past bookings,
+    # so hardcoded dates rot as the calendar advances.
+    d = lambda n: (date.today() + timedelta(days=n)).isoformat()  # noqa: E731
     add_card(client, "borrower1")
     r = client.post(
         "/v1/bookings",
-        json={"listing_id": listing["id"], "start_date": "2026-08-01", "end_date": "2026-08-02"},
+        json={"listing_id": listing["id"], "start_date": d(3), "end_date": d(4)},
         headers=auth("borrower1"),
     )
     client.post(f"/v1/bookings/{r.json()['id']}/approve", headers=auth("lender1"))
 
     r = client.patch(
         f"/v1/listings/{listing['id']}",
-        json={"blackout_dates": ["2026-08-10", "2026-08-11"]},
+        json={"blackout_dates": [d(10), d(11)]},
         headers=auth("lender1"),
     )
     assert r.status_code == 200
 
     avail = client.get(f"/v1/listings/{listing['id']}/availability").json()
-    assert {"start_date": "2026-08-01", "end_date": "2026-08-02"} in avail["booked"]
-    assert avail["blackout_dates"] == ["2026-08-10", "2026-08-11"]
+    assert {"start_date": d(3), "end_date": d(4)} in avail["booked"]
+    assert avail["blackout_dates"] == [d(10), d(11)]
 
 
 def test_blackout_dates_block_bookings(client, listing):

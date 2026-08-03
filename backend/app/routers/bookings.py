@@ -164,43 +164,36 @@ def get_booking(
     return booking
 
 
-def charge_and_confirm(c: Container, booking: Booking) -> Booking:
-    """APPROVED -> CONFIRMED: apply referral credit, charge the remainder,
-    hold the deposit, pay the inviter's bounty on a first rental.
+def release_pending_payment(c: Container, booking: Booking) -> None:
+    """Unwind a not-yet-confirmed payment: restore reserved referral credit
+    and refund/void any in-flight charge. Used when an APPROVED booking is
+    cancelled, expires, or its async payment fails."""
+    if booking.credit_applied_cents > 0:
+        borrower = c.users.get(booking.borrower_uid)
+        if borrower:
+            borrower.credit_cents += booking.credit_applied_cents
+            c.users.upsert(borrower)
+        booking.credit_applied_cents = 0
+    if booking.stripe_payment_intent:
+        try:
+            c.payments.refund_rental(booking.stripe_payment_intent, None)
+        except Exception:
+            pass  # intent may never have succeeded; nothing to refund
+        booking.stripe_payment_intent = ""
 
-    Shared by lender approval and instant book. Raises 402 on payment failure
-    (booking stays APPROVED so the borrower can fix their card).
-    """
-    borrower = c.users.get(booking.borrower_uid) or UserProfile(uid=booking.borrower_uid)
-    customer_id = c.payments.ensure_customer(borrower.uid, borrower.stripe_customer_id)
-    if customer_id != borrower.stripe_customer_id:
-        borrower.stripe_customer_id = customer_id
-        c.users.upsert(borrower)
 
-    credit_used = min(borrower.credit_cents, booking.price.total_cents)
-    to_charge = booking.price.total_cents - credit_used
-    if to_charge > 0:
-        charge = c.payments.charge_rental(customer_id, to_charge, booking.id)
-        if charge.status not in ("succeeded", "requires_capture"):
-            # Payment failed: stay APPROVED; borrower is told to fix payment.
-            # Credit was not deducted — nothing to roll back.
-            c.bookings.update(booking)
-            raise HTTPException(status_code=402, detail="Payment failed; borrower must update payment method")
-        booking.stripe_payment_intent = charge.id
-    if credit_used:
-        booking.credit_applied_cents = credit_used
-        borrower.credit_cents -= credit_used
-        c.users.upsert(borrower)
-
-    if booking.price.deposit_cents > 0:
+def finalize_confirmation(c: Container, booking: Booking, borrower: UserProfile,
+                          customer_id: str) -> Booking:
+    """The payment has succeeded: hold the deposit, flip to CONFIRMED, pay
+    the referral bounty, notify. Shared by the synchronous approve path and
+    the async payment webhook so both flows behave identically."""
+    if booking.price.deposit_cents > 0 and not booking.stripe_deposit_intent:
         try:
             deposit = c.payments.hold_deposit(customer_id, booking.price.deposit_cents, booking.id)
         except Exception:
-            # Never keep money without a confirmed booking: unwind the charge,
+            # Never keep money without a confirmed booking: unwind everything,
             # persist the APPROVED state, surface a retryable failure.
-            if booking.stripe_payment_intent:
-                c.payments.refund_rental(booking.stripe_payment_intent, None)
-                booking.stripe_payment_intent = ""
+            release_pending_payment(c, booking)
             c.bookings.update(booking)
             raise HTTPException(status_code=402, detail="Deposit hold failed; borrower must update payment method")
         booking.stripe_deposit_intent = deposit.id
@@ -224,6 +217,7 @@ def charge_and_confirm(c: Container, booking: Booking) -> Booking:
         borrower.referral_paid = True
         c.users.upsert(borrower)
 
+    credit_used = booking.credit_applied_cents
     credit_note = (
         f" (${credit_used / 100:.2f} referral credit applied)" if credit_used else ""
     )
@@ -236,6 +230,55 @@ def charge_and_confirm(c: Container, booking: Booking) -> Booking:
         booking_id=booking.id,
     )
     return c.bookings.update(booking)
+
+
+def charge_and_confirm(c: Container, booking: Booking) -> Booking:
+    """APPROVED -> CONFIRMED: apply referral credit, charge the remainder,
+    then finalize (deposit, bounty, notify).
+
+    Cards that answer asynchronously (3DS: "processing"/"requires_action")
+    leave the booking APPROVED with the credit reserved and the intent
+    recorded; the Stripe webhook finalizes when payment_intent.succeeded
+    arrives. Hard failures raise 402 with nothing reserved.
+    """
+    borrower = c.users.get(booking.borrower_uid) or UserProfile(uid=booking.borrower_uid)
+    customer_id = c.payments.ensure_customer(borrower.uid, borrower.stripe_customer_id)
+    if customer_id != borrower.stripe_customer_id:
+        borrower.stripe_customer_id = customer_id
+        c.users.upsert(borrower)
+
+    credit_used = min(borrower.credit_cents, booking.price.total_cents)
+    to_charge = booking.price.total_cents - credit_used
+    if to_charge > 0:
+        charge = c.payments.charge_rental(customer_id, to_charge, booking.id)
+        if charge.status in ("processing", "requires_action"):
+            # Async path: reserve the credit so it can't be double-spent while
+            # the card thinks; the webhook completes or releases it.
+            booking.stripe_payment_intent = charge.id
+            if credit_used:
+                booking.credit_applied_cents = credit_used
+                borrower.credit_cents -= credit_used
+                c.users.upsert(borrower)
+            c.bookings.update(booking)
+            c.notifier.notify(
+                booking.borrower_uid,
+                f"Payment confirming — {booking.listing_title}",
+                "Your bank is verifying the charge; we'll notify you the "
+                "moment the booking locks in.",
+                booking_id=booking.id,
+            )
+            return booking
+        if charge.status not in ("succeeded", "requires_capture"):
+            # Hard failure: stay APPROVED; nothing was reserved.
+            c.bookings.update(booking)
+            raise HTTPException(status_code=402, detail="Payment failed; borrower must update payment method")
+        booking.stripe_payment_intent = charge.id
+    if credit_used:
+        booking.credit_applied_cents = credit_used
+        borrower.credit_cents -= credit_used
+        c.users.upsert(borrower)
+
+    return finalize_confirmation(c, booking, borrower, customer_id)
 
 
 @router.post("/{booking_id}/approve", response_model=Booking)
@@ -286,12 +329,17 @@ def cancel(
 ):
     booking = _get_booking_for(booking_id, uid, c)
     was_paid = booking.state == BookingState.CONFIRMED
+    was_pending = booking.state == BookingState.APPROVED  # async payment in flight
     to_state = (
         BookingState.CANCELLED_BY_BORROWER
         if uid == booking.borrower_uid
         else BookingState.CANCELLED_BY_LENDER
     )
     _transition_or_409(booking, to_state, uid)
+
+    if was_pending:
+        # Payment never completed: hand back reserved credit, void the intent.
+        release_pending_payment(c, booking)
 
     if was_paid:
         # Refund math must respect referral credit: cash refunds can never

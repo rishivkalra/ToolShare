@@ -41,6 +41,10 @@ def expire_booking(body: BookingTask, c: Container = Depends(get_container)):
         return {"expired": False}  # already handled — idempotent no-op
     note = ("lender did not respond" if booking.state == BookingState.REQUESTED
             else "payment never completed")
+    if booking.state == BookingState.APPROVED:
+        from .bookings import release_pending_payment
+
+        release_pending_payment(c, booking)
     transition(booking, BookingState.EXPIRED, "system", note)
     c.bookings.update(booking)
     c.notifier.notify(
